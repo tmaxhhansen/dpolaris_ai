@@ -1,0 +1,126 @@
+# ===========================================
+# dPolaris AI Configuration
+# ===========================================
+# Copy to ~/dpolaris_data/config/settings.yaml
+
+# Your trading goal
+goal:
+  target: 3000000        # Target portfolio value: $3M
+  start_date: "2024-01-01"
+  starting_capital: 100000  # Your starting capital
+
+# Risk Management (CRITICAL - adjust carefully)
+risk:
+  max_position_size_percent: 5.0      # Max 5% in any single position
+  max_portfolio_risk_percent: 2.0     # Max 2% portfolio risk per trade
+  max_correlated_exposure: 15.0       # Max 15% in correlated positions
+  min_cash_reserve_percent: 20.0      # Always keep 20% cash
+  max_drawdown_percent: 15.0          # Alert if drawdown exceeds this
+  kelly_fraction: 0.25                # Use quarter-Kelly for position sizing
+
+# API Keys (use environment variables for security)
+# Set these in your shell: export ANTHROPIC_API_KEY=your_key
+api_keys:
+  anthropic: "${ANTHROPIC_API_KEY}"
+  polygon: "${POLYGON_API_KEY}"         # Optional - for better market data
+  alpha_vantage: "${ALPHA_VANTAGE_KEY}" # Optional - for fundamentals
+
+# Broker Integration (for real-time data)
+# broker:
+#   name: "webull"  # or "etrade", "ibkr"
+#   email: "${WEBULL_EMAIL}"
+#   password: "${WEBULL_PASSWORD}"
+
+# Notifications
+notifications:
+  desktop: true    # macOS notifications
+
+  # Email notifications (optional)
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    from: ""
+    to: ""
+    # Use app password, not your real password
+    # username: ""
+    # password: ""
+
+  # Telegram notifications (optional)
+  telegram:
+    enabled: false
+    # bot_token: ""
+    # chat_id: ""
+
+  # Discord webhook (optional)
+  discord:
+    enabled: false
+    # webhook_url: ""
+
+# AI Configuration
+ai:
+  model: "claude-sonnet-4-20250514"     # Default model for most tasks
+  opus_model: "claude-opus-4-5-20251101"  # For complex analysis
+  temperature: 0.3                      # Lower = more consistent
+  max_tokens: 8192
+  conversation_memory_limit: 50         # Messages to keep in context
+  learning_enabled: true                # AI learns from your patterns
+  use_claude_cli: true                  # Use Claude CLI for research
+
+# Machine Learning
+ml:
+  models_dir: "models"
+  training_data_days: 730               # 2 years of data for training
+  validation_split: 0.2
+  batch_size: 32
+  epochs: 100
+  early_stopping_patience: 10
+  device: "auto"                        # 'cpu', 'mps', 'cuda', or 'auto'
+
+# Daemon Schedule
+schedule:
+  market_scan_interval_minutes: 5       # Scan every 5 min during market hours
+  portfolio_update_interval_minutes: 15 # Update positions every 15 min
+  iv_tracking_interval_minutes: 30      # Track IV every 30 min
+  pre_market_briefing_time: "06:00"     # Pre-market briefing time
+  post_market_summary_time: "16:30"     # Post-market summary time
+  weekly_review_day: "sunday"
+  weekly_review_time: "18:00"
+  model_retrain_day: "saturday"         # Weekly model retraining
+  model_retrain_time: "02:00"
+  backup_time: "23:00"                  # Daily backup time
+
+# Default Watchlist
+watchlist:
+  - SPY    # S&P 500 ETF
+  - QQQ    # Nasdaq ETF
+  - IWM    # Russell 2000 ETF
+  - VIX    # Volatility Index
+  - AAPL   # Apple
+  - NVDA   # Nvidia
+  - MSFT   # Microsoft
+  - GOOGL  # Google
+  - AMZN   # Amazon
+  - META   # Meta
+
+# Screening Presets
+screeners:
+  # High IV for premium selling
+  high_iv_premium_selling:
+    iv_rank_min: 50
+    iv_percentile_min: 60
+    min_volume: 100000
+    min_option_volume: 1000
+
+  # Low IV for premium buying
+  low_iv_premium_buying:
+    iv_rank_max: 30
+    iv_percentile_max: 35
+    min_volume: 100000
+
+  # Momentum breakout candidates
+  momentum_breakout:
+    rs_vs_spy_min: 1.2
+    above_50dma: true
+    above_200dma: true
+    volume_surge_ratio: 1.5

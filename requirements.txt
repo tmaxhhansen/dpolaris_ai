@@ -1,0 +1,49 @@
+# Core dependencies
+anthropic>=0.40.0
+fastapi>=0.109.0
+uvicorn>=0.27.0
+websockets>=12.0
+httpx>=0.26.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+apscheduler>=3.10.0
+click>=8.1.0
+rich>=13.7.0
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+
+# Data & ML - Traditional
+pandas>=2.1.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+yfinance>=0.2.36
+
+# Deep Learning
+# PyTorch: Auto-detects CUDA on Windows, falls back to CPU on Mac
+# Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121  (Windows CUDA)
+# Or just: pip install torch  (CPU only / Mac)
+torch>=2.1.0
+
+# Sentiment Analysis
+transformers>=4.36.0  # For FinBERT
+feedparser>=6.0.0     # RSS feed parsing
+
+# Cloud Sync
+supabase>=2.0.0
+
+# Optional: Better ML models (uncomment to enable)
+xgboost>=2.0.0
+lightgbm>=4.2.0
+
+# Optional: Broker integrations
+# webull>=0.3.0
+# pyetrade>=2.0.0
+# ib_insync>=0.9.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+black>=24.1.0
+ruff>=0.1.0
