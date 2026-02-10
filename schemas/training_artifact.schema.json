@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dpolaris.ai/schemas/training_artifact.schema.json",
+  "title": "TrainingRunArtifact",
+  "type": "object",
+  "required": [
+    "training_artifact_version",
+    "run_summary",
+    "data_summary",
+    "feature_summary",
+    "split_summary",
+    "model_summary",
+    "metrics_summary",
+    "backtest_summary",
+    "diagnostics_summary",
+    "artifacts"
+  ],
+  "properties": {
+    "training_artifact_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "run_summary": { "$ref": "./run_summary.schema.json" },
+    "data_summary": { "$ref": "./data_summary.schema.json" },
+    "feature_summary": { "$ref": "./feature_summary.schema.json" },
+    "split_summary": { "$ref": "./split_summary.schema.json" },
+    "model_summary": { "$ref": "./model_summary.schema.json" },
+    "metrics_summary": { "$ref": "./metrics_summary.schema.json" },
+    "backtest_summary": { "$ref": "./backtest_summary.schema.json" },
+    "diagnostics_summary": { "$ref": "./diagnostics_summary.schema.json" },
+    "artifacts": {
+      "type": "object",
+      "required": ["files"],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

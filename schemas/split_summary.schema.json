@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dpolaris.ai/schemas/split_summary.schema.json",
+  "title": "SplitSummary",
+  "type": "object",
+  "required": [
+    "walk_forward_windows",
+    "train_ranges",
+    "val_ranges",
+    "test_ranges",
+    "sample_sizes"
+  ],
+  "properties": {
+    "walk_forward_windows": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "train_ranges": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "val_ranges": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "test_ranges": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "sample_sizes": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

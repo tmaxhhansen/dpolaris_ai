@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dpolaris.ai/schemas/metrics_summary.schema.json",
+  "title": "MetricsSummary",
+  "type": "object",
+  "required": [
+    "classification",
+    "regression",
+    "trading",
+    "calibration"
+  ],
+  "properties": {
+    "classification": { "type": "object", "additionalProperties": true },
+    "regression": { "type": "object", "additionalProperties": true },
+    "trading": { "type": "object", "additionalProperties": true },
+    "calibration": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

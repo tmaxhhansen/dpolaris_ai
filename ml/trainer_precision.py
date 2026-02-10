@@ -39,6 +39,11 @@ from .validation import set_global_seed, validate_no_lookahead_features
 logger = logging.getLogger("dpolaris.ml.trainer")
 
 try:
+    from .training_artifacts import write_training_artifact
+except Exception:  # pragma: no cover - keep trainer functional if artifact module unavailable
+    write_training_artifact = None
+
+try:
     from registry.model_registry import ModelRegistry
 except Exception:  # pragma: no cover - keep trainer functional if registry import fails
     ModelRegistry = None
@@ -784,6 +789,86 @@ class ModelTrainer:
             probability_calibration=validation_report.get("probability_calibration"),
             data_window=data_window,
         )
+        run_info = None
+        if write_training_artifact is not None:
+            try:
+                no_lookahead_status = (
+                    "passed"
+                    if self.precision_config.validation.enforce_no_lookahead
+                    else "not_enforced"
+                )
+                run_info = write_training_artifact(
+                    run_id=None,
+                    status="completed",
+                    model_type=model_type,
+                    target=target,
+                    horizon=target_horizon,
+                    tickers=[model_name.upper()],
+                    timeframes=["1d"],
+                    data_summary={
+                        "sources_used": ["market_history"],
+                        "start": data_window.get("start"),
+                        "end": data_window.get("end"),
+                        "bars_count": data_window.get("rows"),
+                        "missingness_report": {},
+                        "corporate_actions_applied": [],
+                        "adjustments": [],
+                        "outliers_detected": {},
+                        "drop_or_repair_decisions": [],
+                    },
+                    feature_summary={
+                        "feature_registry_version": "1.0.0",
+                        "features": [{"name": name, "params": {}} for name in feature_names],
+                        "missingness_per_feature": {},
+                        "normalization_method": "standard_scaler",
+                        "leakage_checks_status": no_lookahead_status,
+                    },
+                    split_summary={
+                        "walk_forward_windows": validation_report.get("folds", []),
+                        "train_ranges": [],
+                        "val_ranges": [],
+                        "test_ranges": [],
+                        "sample_sizes": {"oof_samples": validation_report.get("oof_samples")},
+                    },
+                    model_summary={
+                        "algorithm": model_type,
+                        "hyperparameters": {},
+                        "feature_importance": feature_importance,
+                        "calibration_method": (validation_report.get("probability_calibration") or {}).get("method"),
+                    },
+                    metrics_summary={
+                        "classification": classification,
+                        "regression": regression,
+                        "trading": trading,
+                        "calibration": {
+                            "method": (validation_report.get("probability_calibration") or {}).get("method"),
+                            "brier_score": classification.get("brier_score"),
+                            "calibration_error": classification.get("calibration_error"),
+                        },
+                    },
+                    backtest_summary={
+                        "assumptions": self.precision_config.backtest.__dict__,
+                        "equity_curve_stats": {
+                            "sharpe": trading.get("sharpe"),
+                            "max_drawdown": trading.get("max_drawdown"),
+                            "total_return": trading.get("total_return"),
+                        },
+                        "trade_list_artifact": None,
+                    },
+                    diagnostics_summary={
+                        "drift_baseline_stats": {},
+                        "regime_distribution": {},
+                        "error_analysis": {},
+                        "top_failure_cases": [],
+                    },
+                    artifact_files=[
+                        str(model_path),
+                        str(Path(model_path).parent / "metadata.json"),
+                        str(Path(model_path).parent / "scaler.pkl"),
+                    ],
+                )
+            except Exception as exc:
+                logger.warning("Training artifact write failed for %s: %s", model_name, exc)
 
         logger.info(
             "Training complete: model=%s type=%s primary_score=%.4f",
@@ -799,4 +884,6 @@ class ModelTrainer:
             "target": target,
             "metrics": metrics,
             "feature_importance": feature_importance[:10],
+            "run_id": run_info.get("run_id") if run_info else None,
+            "run_dir": run_info.get("run_dir") if run_info else None,
         }

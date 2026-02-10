@@ -198,6 +198,8 @@ def main() -> int:
             "model_path": result.get("model_path"),
             "data_quality_report": quality_report_path,
             "data_quality_summary": quality_report.get("checks") if quality_report else None,
+            "run_id": result.get("run_id"),
+            "run_dir": result.get("run_dir"),
         }
         print(json.dumps(payload), flush=True)
         return 0

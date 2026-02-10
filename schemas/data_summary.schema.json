@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dpolaris.ai/schemas/data_summary.schema.json",
+  "title": "DataSummary",
+  "type": "object",
+  "required": [
+    "sources_used",
+    "start",
+    "end",
+    "bars_count",
+    "missingness_report",
+    "corporate_actions_applied",
+    "adjustments",
+    "outliers_detected",
+    "drop_or_repair_decisions",
+    "quality_gates",
+    "data_hashes"
+  ],
+  "properties": {
+    "sources_used": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "start": { "type": ["string", "null"] },
+    "end": { "type": ["string", "null"] },
+    "bars_count": { "type": ["integer", "null"] },
+    "missingness_report": { "type": "object", "additionalProperties": true },
+    "corporate_actions_applied": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "adjustments": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "outliers_detected": { "type": "object", "additionalProperties": true },
+    "drop_or_repair_decisions": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "quality_gates": { "type": "object", "additionalProperties": true },
+    "data_hashes": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

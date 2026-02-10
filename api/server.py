@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import numpy as np
 
@@ -30,6 +31,38 @@ try:
     from monitoring.drift import SelfCritiqueLogger
 except Exception:  # pragma: no cover - keep API startup resilient
     SelfCritiqueLogger = None
+
+try:
+    from ml.training_artifacts import (
+        compare_training_runs,
+        list_run_artifact_files,
+        list_training_runs,
+        load_training_artifact,
+        resolve_run_artifact_path,
+        write_training_artifact,
+    )
+except Exception:  # pragma: no cover
+    compare_training_runs = None
+    list_run_artifact_files = None
+    list_training_runs = None
+    load_training_artifact = None
+    resolve_run_artifact_path = None
+    write_training_artifact = None
+
+try:
+    from ml.prediction_inspector import (
+        build_feature_snapshot,
+        decide_trade_outcome,
+        derive_regime,
+        latest_ohlcv_snapshot,
+        truncate_dataframe_asof,
+    )
+except Exception:  # pragma: no cover
+    build_feature_snapshot = None
+    decide_trade_outcome = None
+    derive_regime = None
+    latest_ohlcv_snapshot = None
+    truncate_dataframe_asof = None
 
 logger = logging.getLogger("dpolaris.api")
 
@@ -630,7 +663,17 @@ async def _run_deep_learning_job(job_id: str) -> None:
             "device": result.get("device", "unknown"),
             "data_quality_report": result.get("data_quality_report"),
             "data_quality_summary": result.get("data_quality_summary"),
+            "run_id": result.get("run_id"),
+            "run_dir": result.get("run_dir"),
         }
+        run_dir = result.get("run_dir")
+        if run_dir and job.get("logs"):
+            try:
+                artifacts_dir = Path(run_dir) / "artifacts"
+                artifacts_dir.mkdir(parents=True, exist_ok=True)
+                (artifacts_dir / "training.log").write_text("\n".join(job["logs"]) + "\n")
+            except Exception as exc:
+                logger.warning("Unable to persist training logs in run artifact %s: %s", run_dir, exc)
         _append_training_job_log(job, "Training completed successfully")
 
         logger.info("Deep-learning job %s completed for %s", job_id, symbol)
@@ -641,6 +684,34 @@ async def _run_deep_learning_job(job_id: str) -> None:
         job["updated_at"] = completed_at
         job["completed_at"] = completed_at
         job["error"] = str(e)
+        if write_training_artifact is not None:
+            try:
+                failure_artifact = write_training_artifact(
+                    run_id=job_id,
+                    status="failed",
+                    model_type=model_type,
+                    target="target_direction",
+                    horizon=5,
+                    tickers=[symbol],
+                    timeframes=["1d"],
+                    started_at=job.get("started_at"),
+                    completed_at=completed_at,
+                    diagnostics_summary={
+                        "drift_baseline_stats": {},
+                        "regime_distribution": {},
+                        "error_analysis": {"message": str(e)},
+                        "top_failure_cases": [{"stage": "deep_learning_job", "error": str(e)}],
+                    },
+                )
+                job["result"] = {
+                    "symbol": symbol,
+                    "model_name": symbol,
+                    "model_type": model_type,
+                    "run_id": failure_artifact.get("run_id"),
+                    "run_dir": failure_artifact.get("run_dir"),
+                }
+            except Exception as artifact_exc:
+                logger.warning("Failed to write failure run artifact for job %s: %s", job_id, artifact_exc)
         _append_training_job_log(job, f"Training failed: {e}")
         logger.exception("Deep-learning job %s failed for %s", job_id, symbol)
 
@@ -1316,9 +1387,72 @@ async def list_training_jobs(limit: int = 20):
     return {"jobs": jobs, "count": len(jobs)}
 
 
+# --- Training Run Artifacts ---
+@app.get("/runs")
+async def list_runs(limit: int = Query(50, ge=1, le=500)):
+    """List training runs from run artifacts."""
+    if list_training_runs is None:
+        raise HTTPException(status_code=503, detail="Training artifact registry unavailable")
+    runs = list_training_runs(limit=limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/runs/compare")
+async def compare_runs(run_ids: str = Query(..., description="Comma-separated run IDs")):
+    """Compare multiple runs on headline metrics."""
+    if compare_training_runs is None:
+        raise HTTPException(status_code=503, detail="Training artifact comparator unavailable")
+    ids = [x.strip() for x in run_ids.split(",") if x.strip()]
+    if len(ids) < 2:
+        raise HTTPException(status_code=400, detail="Provide at least two run IDs")
+    try:
+        return compare_training_runs(ids)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/runs/{run_id}")
+async def get_run_details(run_id: str):
+    """Get full training run artifact payload."""
+    if load_training_artifact is None:
+        raise HTTPException(status_code=503, detail="Training artifact loader unavailable")
+    try:
+        artifact = load_training_artifact(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    return artifact
+
+
+@app.get("/runs/{run_id}/artifacts")
+async def get_run_artifacts(run_id: str):
+    """List files available under runs/<run_id>/."""
+    if list_run_artifact_files is None:
+        raise HTTPException(status_code=503, detail="Training artifact loader unavailable")
+    try:
+        files = list_run_artifact_files(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    return {"run_id": run_id, "artifacts": files, "count": len(files)}
+
+
+@app.get("/runs/{run_id}/artifact/{artifact_name:path}")
+async def get_run_artifact_file(run_id: str, artifact_name: str):
+    """Download one artifact file from a run folder."""
+    if resolve_run_artifact_path is None:
+        raise HTTPException(status_code=503, detail="Training artifact loader unavailable")
+    try:
+        artifact_path = resolve_run_artifact_path(run_id, artifact_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_name}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
+    return FileResponse(path=str(artifact_path), filename=artifact_path.name)
+
+
 @app.post("/api/deep-learning/train/{symbol}")
 async def train_deep_learning(symbol: str, model_type: str = "lstm", epochs: int = 50):
     """Train deep learning model for a symbol"""
+    started_at = utc_now_iso()
     try:
         model_type = model_type.strip().lower()
         if model_type not in SUPPORTED_DL_MODELS:
@@ -1342,11 +1476,44 @@ async def train_deep_learning(symbol: str, model_type: str = "lstm", epochs: int
             "device": result.get("device", "unknown"),
             "data_quality_report": result.get("data_quality_report"),
             "data_quality_summary": result.get("data_quality_summary"),
+            "run_id": result.get("run_id"),
+            "run_dir": result.get("run_dir"),
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        if write_training_artifact is not None:
+            try:
+                failure_artifact = write_training_artifact(
+                    run_id=None,
+                    status="failed",
+                    model_type=model_type,
+                    target="target_direction",
+                    horizon=5,
+                    tickers=[symbol.upper()],
+                    timeframes=["1d"],
+                    started_at=started_at,
+                    completed_at=utc_now_iso(),
+                    diagnostics_summary={
+                        "drift_baseline_stats": {},
+                        "regime_distribution": {},
+                        "error_analysis": {"message": str(e)},
+                        "top_failure_cases": [{"stage": "api_deep_learning_train", "error": str(e)}],
+                    },
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": str(e),
+                        "run_id": failure_artifact.get("run_id"),
+                        "run_dir": failure_artifact.get("run_dir"),
+                    },
+                )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1468,6 +1635,242 @@ def _predict_symbol_direction(symbol: str, df) -> dict:
         f"No usable trained model found for {symbol}. "
         f"Deep-learning error: {deep_learning_error or 'unknown'}"
     )
+
+
+@app.get("/predict/inspect")
+async def inspect_prediction(
+    ticker: str = Query(..., min_length=1),
+    time: Optional[str] = Query(None, description="As-of timestamp (ISO8601)"),
+    horizon: int = Query(5, ge=1, le=60),
+    run_id: Optional[str] = Query(None, alias="runId"),
+):
+    """Inspect one prediction trace using strict as-of (causal) data."""
+    if (
+        truncate_dataframe_asof is None
+        or build_feature_snapshot is None
+        or latest_ohlcv_snapshot is None
+        or derive_regime is None
+        or decide_trade_outcome is None
+    ):
+        raise HTTPException(status_code=503, detail="Prediction inspector utilities unavailable")
+
+    symbol = ticker.strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Ticker is required")
+
+    warnings: list[str] = []
+
+    try:
+        lookback_days = max(
+            int(os.getenv("DPOLARIS_INSPECT_HISTORY_DAYS", "3650")),
+            int(config.ml.training_data_days if config else 730),
+        )
+        market = market_service or MarketDataService()
+        source_df = await market.get_historical(symbol, days=lookback_days)
+
+        if source_df is None or len(source_df) < 80:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough historical data for {symbol} to inspect prediction",
+            )
+
+        slice_info = truncate_dataframe_asof(source_df, time)
+        asof_df = slice_info["frame"]
+        warnings.extend(slice_info.get("warnings") or [])
+
+        feature_snapshot = build_feature_snapshot(asof_df, target_horizon=horizon)
+        raw_features = feature_snapshot.get("raw") or {}
+        raw_input = latest_ohlcv_snapshot(asof_df, slice_info["time_col"])
+
+        prediction = _predict_symbol_direction(symbol, asof_df)
+        probability_up = _safe_float(prediction.get("probability_up"), 0.5)
+        confidence = _safe_float(
+            prediction.get("confidence"),
+            max(probability_up, 1.0 - probability_up),
+        )
+
+        decision = decide_trade_outcome(
+            probability_up=probability_up,
+            confidence=confidence,
+            long_threshold=0.60,
+            short_threshold=0.40,
+            min_confidence=0.55,
+        )
+        regime = derive_regime(raw_features)
+
+        macro_values = {
+            str(k): v
+            for k, v in raw_features.items()
+            if str(k).startswith("macro_")
+        }
+        if not macro_values:
+            macro_values = {"available": False}
+            warnings.append("No macro features available for this as-of timestamp.")
+
+        sentiment_counts = {
+            str(k): v
+            for k, v in raw_features.items()
+            if str(k).startswith("sent_")
+            or "sentiment" in str(k)
+            or "attention" in str(k)
+        }
+        if not sentiment_counts:
+            sentiment_counts = {"available": False}
+            warnings.append("No sentiment features available for this as-of timestamp.")
+
+        normalized_features: dict[str, Optional[float]] = {}
+        normalization = {
+            "method": "none",
+            "scaler_applied": False,
+            "feature_count": 0,
+            "source": "raw",
+        }
+
+        if str(prediction.get("source", "")).lower() == "classic_ml":
+            try:
+                from ml import Predictor
+
+                predictor = Predictor()
+                model_name = str(prediction.get("model_name") or "")
+                if model_name and predictor.load_model(model_name):
+                    model_data = predictor.loaded_models.get(model_name, {})
+                    scaler = model_data.get("scaler")
+                    metadata = model_data.get("metadata", {}) or {}
+                    model_feature_names = list(metadata.get("feature_names") or feature_snapshot.get("feature_names") or [])
+
+                    prepared_values: list[float] = []
+                    prepared_names: list[str] = []
+                    for name in model_feature_names:
+                        raw_value = raw_features.get(name)
+                        numeric_value = None
+                        try:
+                            candidate = float(raw_value)
+                            if np.isfinite(candidate):
+                                numeric_value = candidate
+                        except Exception:
+                            numeric_value = None
+                        prepared_names.append(name)
+                        prepared_values.append(np.nan if numeric_value is None else numeric_value)
+
+                    if prepared_names:
+                        normalization["feature_count"] = len(prepared_names)
+                        raw_matrix = np.asarray([prepared_values], dtype=float)
+
+                        if scaler is not None and np.isfinite(raw_matrix).all():
+                            scaled_matrix = scaler.transform(raw_matrix)
+                            scaled_values = scaled_matrix[0]
+                            normalized_features = {
+                                name: (float(scaled_values[idx]) if np.isfinite(scaled_values[idx]) else None)
+                                for idx, name in enumerate(prepared_names)
+                            }
+                            normalization["method"] = "model_scaler"
+                            normalization["scaler_applied"] = True
+                            normalization["source"] = "model"
+                        else:
+                            normalized_features = {
+                                name: (float(prepared_values[idx]) if np.isfinite(prepared_values[idx]) else None)
+                                for idx, name in enumerate(prepared_names)
+                            }
+                            normalization["method"] = "raw_fallback"
+                            normalization["source"] = "model"
+                            if scaler is not None:
+                                warnings.append(
+                                    "Scaler exists but could not be applied because one or more model inputs are missing/non-finite."
+                                )
+
+                        precision_cfg = metadata.get("precision_config") if isinstance(metadata, dict) else None
+                        if isinstance(precision_cfg, dict):
+                            feature_cfg = precision_cfg.get("features")
+                            if isinstance(feature_cfg, dict) and feature_cfg.get("scaling_method"):
+                                normalization["method"] = str(feature_cfg.get("scaling_method"))
+                    else:
+                        warnings.append("Model metadata did not expose feature_names for normalization.")
+                else:
+                    warnings.append("Model context unavailable; returning raw feature vector only.")
+            except Exception as exc:
+                warnings.append(f"Normalization context unavailable: {exc}")
+
+        if not normalized_features:
+            normalization["feature_count"] = len(raw_features)
+
+        explanation_top = _rank_signal_features(raw_features, top_n=8)
+        if not explanation_top:
+            explanation_top = list(feature_snapshot.get("top_abs_features") or [])[:8]
+
+        explanation_notes = [
+            f"Regime: {regime.get('label', 'unknown')}.",
+            f"Model source: {prediction.get('source', 'unknown')}.",
+            f"Decision: {decision.get('action', 'unknown')} ({decision.get('reason', 'n/a')}).",
+        ]
+
+        run_context = {}
+        resolved_run_id = run_id.strip() if run_id else None
+        if resolved_run_id and load_training_artifact is not None:
+            try:
+                artifact = load_training_artifact(resolved_run_id)
+                run_summary = artifact.get("run_summary", {}) if isinstance(artifact, dict) else {}
+                run_context = {
+                    "run_id": run_summary.get("run_id", resolved_run_id),
+                    "status": run_summary.get("status"),
+                    "model_type": run_summary.get("model_type"),
+                    "target": run_summary.get("target"),
+                    "horizon": run_summary.get("horizon"),
+                }
+            except FileNotFoundError:
+                warnings.append(f"Run {resolved_run_id} was not found; continuing without run artifact context.")
+            except Exception as exc:
+                warnings.append(f"Run artifact context unavailable: {exc}")
+
+        return {
+            "ticker": symbol,
+            "requested_time": slice_info.get("requested_time"),
+            "resolved_time": slice_info.get("resolved_time"),
+            "horizon": int(horizon),
+            "run_id": resolved_run_id,
+            "run_context": run_context,
+            "trace_meta": {
+                "rows_total": int(slice_info.get("rows_total", 0)),
+                "rows_used": int(slice_info.get("rows_used", 0)),
+                "latest_source_time": slice_info.get("latest_source_time"),
+                "feature_timestamp": feature_snapshot.get("feature_timestamp"),
+                "causal_asof": True,
+            },
+            "raw_input_snapshot": {
+                "ohlcv": raw_input,
+                "macro_values": macro_values,
+                "sentiment_counts": sentiment_counts,
+            },
+            "feature_vector": {
+                "raw": raw_features,
+                "normalized": normalized_features,
+                "normalization": normalization,
+            },
+            "regime": regime,
+            "model_output": prediction,
+            "decision": decision,
+            "explanation": {
+                "top_features": explanation_top,
+                "notes": explanation_notes,
+            },
+            "warnings": warnings,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Prediction inspect failed for %s", symbol)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/predict/inspect")
+async def inspect_prediction_legacy(
+    ticker: str = Query(..., min_length=1),
+    time: Optional[str] = Query(None, description="As-of timestamp (ISO8601)"),
+    horizon: int = Query(5, ge=1, le=60),
+    run_id: Optional[str] = Query(None, alias="runId"),
+):
+    """Legacy alias for /predict/inspect."""
+    return await inspect_prediction(ticker=ticker, time=time, horizon=horizon, run_id=run_id)
 
 
 @app.post("/api/signals/{symbol}")

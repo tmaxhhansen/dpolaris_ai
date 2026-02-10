@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dpolaris.ai/schemas/diagnostics_summary.schema.json",
+  "title": "DiagnosticsSummary",
+  "type": "object",
+  "required": [
+    "drift_baseline_stats",
+    "regime_distribution",
+    "error_analysis",
+    "top_failure_cases"
+  ],
+  "properties": {
+    "drift_baseline_stats": { "type": "object", "additionalProperties": true },
+    "regime_distribution": { "type": "object", "additionalProperties": true },
+    "error_analysis": { "type": "object", "additionalProperties": true },
+    "top_failure_cases": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    }
+  },
+  "additionalProperties": true
+}
