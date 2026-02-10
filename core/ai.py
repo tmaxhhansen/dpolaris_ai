@@ -516,12 +516,25 @@ Provide:
 
         try:
             from ml import ModelTrainer
-            from tools.market_data import fetch_historical_data
+            from data.dataset_builder import DatasetBuildRequest, UnifiedDatasetBuilder
 
-            # Fetch data
-            df = await fetch_historical_data(symbol, days=500)
-            if df is None or df.empty:
+            # Fetch + quality-gate data through unified layer
+            builder = UnifiedDatasetBuilder()
+            dataset, quality_report, report_path = builder.build(
+                DatasetBuildRequest(
+                    symbol=symbol,
+                    days=500,
+                    interval="1d",
+                    horizon_days=5,
+                )
+            )
+            if dataset is None or dataset.empty:
                 return f"Could not fetch data for {symbol}"
+
+            # Keep model training feature pipeline stable (OHLCV + date only).
+            required_cols = ["timestamp", "open", "high", "low", "close", "volume"]
+            df = dataset[required_cols].rename(columns={"timestamp": "date"}).copy()
+            df["date"] = df["date"].astype(str)
 
             # Train model
             trainer = ModelTrainer()
@@ -548,6 +561,8 @@ Provide:
 {chr(10).join([f"- {f[0]}: {f[1]:.3f}" for f in result['feature_importance'][:5]])}
 
 Model saved to: {result['model_path']}
+Data quality report: {report_path}
+Minimum history check: {quality_report.get('checks', {}).get('minimum_history', {}).get('passed')}
 """
 
         except Exception as e:

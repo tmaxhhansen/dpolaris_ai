@@ -1,0 +1,39 @@
+random_seed: 42
+
+target:
+  classification: target_direction
+  regression: target_return
+  horizon_days: 5
+
+validation:
+  method: walk_forward
+  walk_forward_splits: 5
+  min_samples: 500
+  enforce_no_lookahead: true
+  no_lookahead_sample_count: 12
+
+metrics:
+  reliability_bins: 10
+  regression_hit_rate_thresholds:
+    - 0.0
+    - 0.0025
+    - 0.005
+    - 0.01
+
+backtest:
+  transaction_cost_bps: 2.0
+  slippage_bps: 3.0
+  long_threshold: 0.55
+  short_threshold: 0.45
+  annualization_periods: 252
+
+calibration:
+  enabled: true
+  method: platt
+
+primary_score:
+  objective: maximize_sharpe_with_drawdown_cap
+  metric: sharpe
+  fallback_metric: f1
+  max_drawdown: 0.20
+  min_trades: 25

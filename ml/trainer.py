@@ -540,3 +540,9 @@ class ModelTrainer:
             "metrics": metrics,
             "feature_importance": feature_importance[:10],
         }
+
+
+# Use precision-enhanced trainer implementation by default while keeping module path stable.
+from .trainer_precision import ModelTrainer as _PrecisionModelTrainer
+
+ModelTrainer = _PrecisionModelTrainer

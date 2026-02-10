@@ -20,6 +20,11 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from .evaluation import (
+    apply_probability_calibration,
+    compute_classification_metrics,
+    fit_platt_calibration,
+)
 
 from .features import FeatureEngine
 
@@ -284,10 +289,6 @@ class DeepLearningTrainer:
         X = df[feature_cols].values
         y = df[target_col].values.astype(int)
 
-        # Scale features
-        self.scaler = StandardScaler()
-        X = self.scaler.fit_transform(X)
-
         # Ensure both train and test have enough rows for robust sequential windows.
         min_rows_train = sequence_length + min_train_sequences
         min_rows_test = sequence_length + min_test_sequences
@@ -308,8 +309,13 @@ class DeepLearningTrainer:
         upper_bound = total_rows - min_rows_test
         split_idx = max(lower_bound, min(split_idx, upper_bound))
 
-        X_train, X_test = X[:split_idx], X[split_idx:]
+        X_train_raw, X_test_raw = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
+
+        # Scale with training split only to avoid lookahead leakage.
+        self.scaler = StandardScaler()
+        X_train = self.scaler.fit_transform(X_train_raw)
+        X_test = self.scaler.transform(X_test_raw)
 
         # Create datasets
         train_dataset = StockSequenceDataset(X_train, y_train, sequence_length)
@@ -503,12 +509,18 @@ class DeepLearningTrainer:
                 all_targets.extend(y_batch.numpy())
                 all_probs.extend(probs[:, 1].cpu().numpy())
 
-        return {
-            "accuracy": accuracy_score(all_targets, all_preds),
-            "precision": precision_score(all_targets, all_preds, zero_division=0),
-            "recall": recall_score(all_targets, all_preds, zero_division=0),
-            "f1": f1_score(all_targets, all_preds, zero_division=0),
-        }
+        calibration = fit_platt_calibration(all_probs, all_targets)
+        calibrated_probs = apply_probability_calibration(all_probs, calibration)
+        calibrated_preds = (calibrated_probs >= 0.5).astype(int)
+
+        metrics = compute_classification_metrics(
+            y_true=all_targets,
+            y_pred=calibrated_preds,
+            y_proba=calibrated_probs,
+            reliability_bins=10,
+        )
+        metrics["probability_calibration"] = calibration
+        return metrics
 
     def save_model(
         self,
@@ -747,6 +759,7 @@ class DeepLearningTrainer:
         scaler: StandardScaler,
         df: pd.DataFrame,
         sequence_length: int = 60,
+        probability_calibration: Optional[dict] = None,
     ) -> dict:
         """
         Make prediction on new data.
@@ -772,12 +785,24 @@ class DeepLearningTrainer:
             outputs = model(X_tensor)
             probs = torch.softmax(outputs, dim=1)
             pred = outputs.argmax(dim=1).item()
-            confidence = probs[0, pred].item()
+            prob_up_raw = probs[0, 1].item()
+            prob_down_raw = probs[0, 0].item()
+
+        calibrated = apply_probability_calibration(
+            np.asarray([prob_up_raw], dtype=float),
+            probability_calibration,
+        )
+        probability_up = float(calibrated[0])
+        probability_down = float(1.0 - probability_up)
+        confidence = max(probability_up, probability_down)
+        pred = 1 if probability_up >= 0.5 else 0
 
         return {
             "prediction": pred,
             "prediction_label": "UP" if pred == 1 else "DOWN",
             "confidence": confidence,
-            "probability_up": probs[0, 1].item(),
-            "probability_down": probs[0, 0].item(),
+            "probability_up": probability_up,
+            "probability_down": probability_down,
+            "raw_probability_up": prob_up_raw,
+            "raw_probability_down": prob_down_raw,
         }

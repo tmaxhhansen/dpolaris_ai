@@ -408,7 +408,7 @@ class Database:
         exit_price: float,
         outcome_notes: str = "",
         lessons: str = "",
-    ):
+    ) -> Optional[dict]:
         """Close a trade with exit details"""
         with self.get_connection() as conn:
             trade = conn.execute(
@@ -429,6 +429,24 @@ class Database:
                     (datetime.now(), exit_price, pnl, pnl_percent, outcome_notes, lessons, trade_id),
                 )
                 conn.commit()
+                return {
+                    "trade_id": trade_id,
+                    "entry_price": float(trade["entry_price"]),
+                    "quantity": float(trade["quantity"]),
+                    "exit_price": float(exit_price),
+                    "pnl": float(pnl),
+                    "pnl_percent": float(pnl_percent),
+                }
+            return None
+
+    def get_trade(self, trade_id: int) -> Optional[dict]:
+        """Get one trade by id."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM trades WHERE id = ?",
+                (trade_id,),
+            ).fetchone()
+            return dict(row) if row else None
 
     def get_trades(
         self,

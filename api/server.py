@@ -18,12 +18,18 @@ from uuid import uuid4
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import numpy as np
 
 from core.config import Config, get_config
 from core.database import Database
 from core.memory import DPolarisMemory
 from core.ai import DPolarisAI
 from tools.market_data import MarketDataService, get_market_overview
+
+try:
+    from monitoring.drift import SelfCritiqueLogger
+except Exception:  # pragma: no cover - keep API startup resilient
+    SelfCritiqueLogger = None
 
 logger = logging.getLogger("dpolaris.api")
 
@@ -33,6 +39,7 @@ db: Optional[Database] = None
 memory: Optional[DPolarisMemory] = None
 ai: Optional[DPolarisAI] = None
 market_service: Optional[MarketDataService] = None
+self_critique_logger = None
 training_jobs: dict[str, dict] = {}
 training_job_order: list[str] = []
 training_job_queue: Optional[asyncio.Queue[str]] = None
@@ -265,6 +272,56 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(default)
 
 
+def _parse_tags(tags_value) -> list[str]:
+    if tags_value is None:
+        return []
+    if isinstance(tags_value, list):
+        return [str(x) for x in tags_value]
+    if isinstance(tags_value, str):
+        raw = tags_value.strip()
+        if not raw:
+            return []
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, list):
+                return [str(x) for x in loaded]
+        except json.JSONDecodeError:
+            pass
+        return [x.strip() for x in raw.split(",") if x.strip()]
+    return []
+
+
+def _extract_signal_id_from_tags(tags_value) -> Optional[str]:
+    tags = _parse_tags(tags_value)
+    for tag in tags:
+        if str(tag).startswith("signal_id:"):
+            value = str(tag).split("signal_id:", 1)[1].strip()
+            if value:
+                return value
+    return None
+
+
+def _rank_signal_features(latest_features, *, top_n: int = 5) -> list[str]:
+    feature_scores: dict[str, float] = {}
+
+    def _score(name: str, value: float) -> None:
+        if np.isfinite(value):
+            feature_scores[name] = abs(float(value))
+
+    _score("roc_5", _safe_float(latest_features.get("roc_5"), 0.0))
+    _score("hvol_20", _safe_float(latest_features.get("hvol_20"), 0.0))
+    _score("atr_14", _safe_float(latest_features.get("atr_14"), 0.0))
+    _score("adx", _safe_float(latest_features.get("adx"), 0.0) - 20.0)
+    _score("rsi_14", _safe_float(latest_features.get("rsi_14"), 50.0) - 50.0)
+    _score("vol_ratio_20", _safe_float(latest_features.get("vol_ratio_20"), 1.0) - 1.0)
+    _score("price_sma20_ratio", _safe_float(latest_features.get("price_sma20_ratio"), 1.0) - 1.0)
+    _score("price_sma50_ratio", _safe_float(latest_features.get("price_sma50_ratio"), 1.0) - 1.0)
+    _score("price_sma200_ratio", _safe_float(latest_features.get("price_sma200_ratio"), 1.0) - 1.0)
+
+    ranked = sorted(feature_scores.items(), key=lambda x: x[1], reverse=True)
+    return [name for name, _ in ranked[: max(1, int(top_n))]]
+
+
 def _build_signal_from_features(
     symbol: str,
     latest_price: float,
@@ -444,8 +501,31 @@ def _build_signal_from_features(
         "max_premium_pct_of_portfolio": round(max_risk_percent * 0.5, 2),
     }
 
+    top_features = _rank_signal_features(latest_features, top_n=5)
+    signal_id: Optional[str] = None
+    if self_critique_logger is not None:
+        try:
+            signal_id = self_critique_logger.log_signal(
+                symbol=symbol,
+                timestamp=utc_now_iso(),
+                confidence=setup_confidence,
+                regime=f"{trend.lower()}_{volatility_regime.lower()}",
+                top_features=top_features,
+                prediction=probability_up,
+                model_name=prediction.get("model_name"),
+                model_version=prediction.get("model_version"),
+                extra={
+                    "bias": bias,
+                    "setup_type": setup_type,
+                    "horizon_days": int(horizon_days),
+                },
+            )
+        except Exception as exc:
+            logger.warning("Self-critique signal logging failed for %s: %s", symbol, exc)
+
     return {
         "symbol": symbol,
+        "signal_id": signal_id,
         "generated_at": utc_now_iso(),
         "bias": bias,
         "setup_type": setup_type,
@@ -492,8 +572,10 @@ def _build_signal_from_features(
             "source": prediction.get("source", "unknown"),
             "name": prediction.get("model_name", "unknown"),
             "type": prediction.get("model_type", "unknown"),
+            "version": prediction.get("model_version"),
             "accuracy": round(_safe_float(model_accuracy_float, 0.0), 6) if model_accuracy_float is not None else None,
         },
+        "top_features": top_features,
         "market_snapshot": {
             "last_price": round(latest_price, 4),
             "rsi_14": round(rsi_14, 4),
@@ -546,6 +628,8 @@ async def _run_deep_learning_job(job_id: str) -> None:
             "metrics": result.get("metrics"),
             "epochs_trained": result.get("epochs_trained", epochs),
             "device": result.get("device", "unknown"),
+            "data_quality_report": result.get("data_quality_report"),
+            "data_quality_summary": result.get("data_quality_summary"),
         }
         _append_training_job_log(job, "Training completed successfully")
 
@@ -579,7 +663,7 @@ async def _deep_learning_job_worker() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler"""
-    global config, db, memory, ai, market_service
+    global config, db, memory, ai, market_service, self_critique_logger
     global training_jobs, training_job_order, training_job_queue, training_job_worker_task
     global server_started_at
 
@@ -590,6 +674,8 @@ async def lifespan(app: FastAPI):
     memory = DPolarisMemory(db)
     ai = DPolarisAI(config, db, memory)
     market_service = MarketDataService()
+    if SelfCritiqueLogger is not None:
+        self_critique_logger = SelfCritiqueLogger(log_dir=config.data_dir / "reports" / "self_critique")
     training_jobs = {}
     training_job_order = []
     training_job_queue = asyncio.Queue()
@@ -609,6 +695,7 @@ async def lifespan(app: FastAPI):
         training_job_worker_task = None
     training_job_queue = None
     server_started_at = None
+    self_critique_logger = None
 
     logger.info("Shutting down dPolaris API...")
 
@@ -660,6 +747,7 @@ class TradeCreate(BaseModel):
     market_regime: Optional[str] = None
     conviction_score: Optional[float] = None
     tags: list[str] = Field(default_factory=list)
+    signal_id: Optional[str] = None
 
 
 class TradeClose(BaseModel):
@@ -820,6 +908,12 @@ async def get_journal(
 @app.post("/api/journal")
 async def create_trade(trade: TradeCreate):
     """Add trade to journal"""
+    tags = list(trade.tags)
+    if trade.signal_id:
+        signal_tag = f"signal_id:{trade.signal_id}"
+        if signal_tag not in tags:
+            tags.append(signal_tag)
+
     trade_id = db.add_trade(
         symbol=trade.symbol.upper(),
         strategy=trade.strategy,
@@ -830,7 +924,7 @@ async def create_trade(trade: TradeCreate):
         iv_at_entry=trade.iv_at_entry,
         market_regime=trade.market_regime,
         conviction_score=trade.conviction_score,
-        tags=trade.tags,
+        tags=tags,
     )
     return {"id": trade_id, "status": "created"}
 
@@ -838,12 +932,31 @@ async def create_trade(trade: TradeCreate):
 @app.put("/api/journal/{trade_id}/close")
 async def close_trade(trade_id: int, close_data: TradeClose):
     """Close a trade"""
-    db.close_trade(
+    close_result = db.close_trade(
         trade_id=trade_id,
         exit_price=close_data.exit_price,
         outcome_notes=close_data.outcome_notes,
         lessons=close_data.lessons,
     )
+
+    trade_row = db.get_trade(trade_id)
+    if trade_row and close_result and self_critique_logger is not None:
+        signal_id = _extract_signal_id_from_tags(trade_row.get("tags"))
+        if signal_id:
+            try:
+                self_critique_logger.log_outcome(
+                    signal_id=signal_id,
+                    outcome_timestamp=utc_now_iso(),
+                    realized_return=_safe_float(close_result.get("pnl_percent"), 0.0) / 100.0,
+                    pnl=_safe_float(close_result.get("pnl"), 0.0),
+                    notes=close_data.outcome_notes,
+                    extra={
+                        "trade_id": trade_id,
+                        "symbol": trade_row.get("symbol"),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Self-critique outcome logging failed for trade %s: %s", trade_id, exc)
 
     # Learn from the trade
     trades = db.get_trades(limit=1)
@@ -1227,6 +1340,8 @@ async def train_deep_learning(symbol: str, model_type: str = "lstm", epochs: int
             "metrics": result.get("metrics"),
             "epochs_trained": result.get("epochs_trained", epochs),
             "device": result.get("device", "unknown"),
+            "data_quality_report": result.get("data_quality_report"),
+            "data_quality_summary": result.get("data_quality_summary"),
         }
 
     except HTTPException:
@@ -1260,7 +1375,12 @@ async def deep_learning_predict(symbol: str):
             raise HTTPException(status_code=400, detail="Not enough recent data")
 
         # Predict
-        result = trainer.predict(model, scaler, df)
+        result = trainer.predict(
+            model,
+            scaler,
+            df,
+            probability_calibration=metadata.get("metrics", {}).get("probability_calibration"),
+        )
 
         return {
             "symbol": symbol.upper(),
@@ -1286,12 +1406,18 @@ def _predict_symbol_direction(symbol: str, df) -> dict:
 
         trainer = DeepLearningTrainer()
         model, scaler, metadata = trainer.load_model(symbol)
-        result = trainer.predict(model, scaler, df)
+        result = trainer.predict(
+            model,
+            scaler,
+            df,
+            probability_calibration=metadata.get("metrics", {}).get("probability_calibration"),
+        )
 
         return {
             "source": "deep_learning",
             "model_name": f"{symbol}_dl",
             "model_type": metadata.get("model_type", "lstm"),
+            "model_version": metadata.get("version"),
             "model_accuracy": metadata.get("metrics", {}).get("accuracy"),
             "prediction_label": result["prediction_label"],
             "confidence": _safe_float(result.get("confidence"), 0.5),
@@ -1323,6 +1449,7 @@ def _predict_symbol_direction(symbol: str, df) -> dict:
                     "source": "classic_ml",
                     "model_name": model_name,
                     "model_type": metadata.get("model_type", "unknown"),
+                    "model_version": metadata.get("version"),
                     "model_accuracy": metadata.get("metrics", {}).get("accuracy"),
                     "prediction_label": str(prediction_label).upper(),
                     "confidence": _safe_float(confidence, 0.5),

@@ -15,6 +15,7 @@ import pandas as pd
 
 from .features import FeatureEngine
 from .trainer import ModelTrainer
+from .evaluation import apply_probability_calibration
 
 logger = logging.getLogger("dpolaris.ml.predictor")
 
@@ -77,6 +78,7 @@ class Predictor:
         scaler = model_data["scaler"]
         metadata = model_data["metadata"]
         feature_names = metadata["feature_names"]
+        probability_calibration = metadata.get("probability_calibration")
 
         # Generate features
         df_features = self.feature_engine.generate_features(df, include_targets=False)
@@ -103,11 +105,27 @@ class Predictor:
         }
 
         # Add probability if available
-        if return_proba and hasattr(model, "predict_proba"):
-            proba = model.predict_proba(latest)[0]
-            result["confidence"] = float(max(proba))
-            result["probability_up"] = float(proba[1]) if len(proba) > 1 else float(proba[0])
-            result["probability_down"] = float(proba[0]) if len(proba) > 1 else 1 - float(proba[0])
+        if return_proba:
+            if hasattr(model, "predict_proba"):
+                raw_proba = model.predict_proba(latest)[0]
+                raw_probability_up = float(raw_proba[1]) if len(raw_proba) > 1 else float(raw_proba[0])
+            elif hasattr(model, "decision_function"):
+                score = float(np.asarray(model.decision_function(latest)).reshape(-1)[0])
+                raw_probability_up = float(1.0 / (1.0 + np.exp(-score)))
+            else:
+                raw_probability_up = 0.75 if int(prediction) == 1 else 0.25
+
+            calibrated = apply_probability_calibration(
+                np.asarray([raw_probability_up], dtype=float),
+                probability_calibration,
+            )
+            probability_up = float(calibrated[0])
+            probability_down = float(1.0 - probability_up)
+
+            result["confidence"] = float(max(probability_up, probability_down))
+            result["probability_up"] = probability_up
+            result["probability_down"] = probability_down
+            result["raw_probability_up"] = raw_probability_up
 
         return result
 

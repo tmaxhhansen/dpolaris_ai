@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime
 
 from tools.market_data import MarketDataService
 
@@ -24,6 +25,38 @@ logger = logging.getLogger("dpolaris.ml.worker")
 async def _fetch_history(symbol: str, days: int):
     market = MarketDataService()
     return await market.get_historical(symbol, days=days)
+
+
+def _build_training_frame(symbol: str, days: int):
+    """
+    Build canonical, quality-gated training frame via unified data layer.
+    """
+    try:
+        from data.dataset_builder import DatasetBuildRequest, UnifiedDatasetBuilder
+
+        run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        builder = UnifiedDatasetBuilder()
+        dataset, quality_report, report_path = builder.build(
+            DatasetBuildRequest(
+                symbol=symbol,
+                days=days,
+                interval="1d",
+                horizon_days=5,
+                run_id=run_id,
+            )
+        )
+
+        required = ["timestamp", "open", "high", "low", "close", "volume"]
+        missing_cols = [col for col in required if col not in dataset.columns]
+        if missing_cols:
+            raise ValueError(f"Unified dataset missing required columns: {missing_cols}")
+
+        train_df = dataset[required].rename(columns={"timestamp": "date"}).copy()
+        train_df["date"] = train_df["date"].astype(str)
+        return train_df, quality_report, str(report_path)
+    except Exception as exc:
+        logger.warning("Unified dataset builder unavailable, falling back to direct history fetch: %s", exc)
+        return None, None, None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -119,12 +152,27 @@ def main() -> int:
             args.epochs,
         )
         logger.info("Fetching historical data (days=%d)", args.history_days)
-        df = asyncio.run(_fetch_history(symbol, args.history_days))
+
+        df, quality_report, quality_report_path = _build_training_frame(symbol, args.history_days)
+        if df is None:
+            df = asyncio.run(_fetch_history(symbol, args.history_days))
+            quality_report = None
+            quality_report_path = None
+
         if df is None or len(df) < 200:
             logger.error("Not enough historical data")
             return 2
 
         logger.info("Fetched %d rows", len(df))
+        if quality_report_path:
+            logger.info("Data quality report: %s", quality_report_path)
+            min_history = (quality_report or {}).get("checks", {}).get("minimum_history", {})
+            logger.info(
+                "Quality minimum history check passed=%s required=%s actual=%s",
+                min_history.get("passed"),
+                min_history.get("required_rows"),
+                min_history.get("actual_rows"),
+            )
         logger.info("Starting training pipeline")
         trainer = DeepLearningTrainer()
         result = trainer.train_full_pipeline(
@@ -148,6 +196,8 @@ def main() -> int:
             "epochs_trained": result.get("epochs_trained", args.epochs),
             "device": result.get("device", "unknown"),
             "model_path": result.get("model_path"),
+            "data_quality_report": quality_report_path,
+            "data_quality_summary": quality_report.get("checks") if quality_report else None,
         }
         print(json.dumps(payload), flush=True)
         return 0
