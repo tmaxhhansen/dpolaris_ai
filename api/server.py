@@ -28,6 +28,7 @@ from core.config import Config, get_config
 from core.database import Database
 from core.memory import DPolarisMemory
 from core.ai import DPolarisAI
+from core.llm_provider import LLMUnavailableError
 from tools.market_data import MarketDataService, get_market_overview
 
 try:
@@ -185,6 +186,31 @@ def _public_training_job(job: dict) -> dict:
         "completed_at": job.get("completed_at"),
         "logs": job.get("logs", []),
     }
+
+
+def _llm_disabled_detail() -> dict[str, Any]:
+    provider = "none"
+    reason = "LLM provider is disabled."
+    if ai is not None:
+        provider = ai.llm_provider_name
+        reason = ai.llm_disabled_reason or reason
+    return {
+        "error": "llm_disabled",
+        "provider": provider,
+        "detail": reason,
+    }
+
+
+def _require_llm_enabled() -> None:
+    if ai is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "service_unavailable", "detail": "AI engine is not initialized."},
+        )
+    try:
+        ai.require_llm_enabled()
+    except LLMUnavailableError:
+        raise HTTPException(status_code=503, detail=_llm_disabled_detail())
 
 
 def _trim_training_jobs() -> None:
@@ -2630,6 +2656,9 @@ async def get_ai_status():
         "total_memories": total_memories,
         "total_trades": total_trades,
         "models_available": models_available,
+        "llm_provider": ai.llm_provider_name if ai else "none",
+        "llm_enabled": ai.llm_enabled if ai else False,
+        "llm_detail": None if (ai and ai.llm_enabled) else _llm_disabled_detail()["detail"],
         "uptime": _format_uptime(server_started_at),
         "win_rate": win_rate,
     }
@@ -2657,6 +2686,7 @@ async def add_memory(entry: MemoryCreate):
 @app.post("/api/chat")
 async def chat(message: ChatMessage):
     """Chat with dPolaris AI"""
+    _require_llm_enabled()
     response = await ai.chat(message.message)
     return {"response": response, "timestamp": datetime.now().isoformat()}
 
@@ -2664,6 +2694,7 @@ async def chat(message: ChatMessage):
 @app.post("/api/analyze")
 async def analyze(request: AnalyzeRequest):
     """Analyze a symbol"""
+    _require_llm_enabled()
     response = await ai.chat(f"@analyze {request.symbol}")
     return {
         "symbol": request.symbol,
@@ -2675,6 +2706,7 @@ async def analyze(request: AnalyzeRequest):
 @app.get("/api/scout")
 async def scout():
     """Run opportunity scanner"""
+    _require_llm_enabled()
     response = await ai.chat("@scout")
     return {"report": response, "timestamp": datetime.now().isoformat()}
 

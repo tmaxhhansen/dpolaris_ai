@@ -16,12 +16,16 @@ from typing import Optional, AsyncIterator
 import asyncio
 import logging
 
-import anthropic
-
 from .config import Config, get_config
 from .database import Database
 from .memory import DPolarisMemory
 from .claude_cli import ClaudeCLI, ClaudeCLIPool
+from .llm_provider import (
+    AnthropicProvider,
+    LLMProvider,
+    LLMUnavailableError,
+    NullProvider,
+)
 
 logger = logging.getLogger("dpolaris.ai")
 
@@ -47,10 +51,12 @@ class DPolarisAI:
         self.db = db or Database()
         self.memory = memory or DPolarisMemory(self.db)
 
-        # Initialize Anthropic client
-        self.client = anthropic.Anthropic(
-            api_key=self.config.api_keys.anthropic,
-        )
+        # Initialize configured LLM provider.
+        self.llm_provider = self._build_llm_provider()
+        if self.llm_provider.enabled:
+            logger.info("LLM provider enabled: %s", self.llm_provider.name)
+        else:
+            logger.warning("LLM provider disabled: %s", self.llm_provider.disabled_reason)
 
         # Claude CLI for research
         self.claude_cli = ClaudeCLI() if self.config.ai.use_claude_cli else None
@@ -62,6 +68,40 @@ class DPolarisAI:
 
         # Load system prompt
         self.system_prompt = self._build_system_prompt()
+
+    def _build_llm_provider(self) -> LLMProvider:
+        provider_name = (self.config.ai.llm_provider or "").strip().lower() or "none"
+
+        if provider_name == "none":
+            return NullProvider(
+                "LLM is disabled (LLM_PROVIDER=none). Set LLM_PROVIDER=anthropic and configure ANTHROPIC_API_KEY."
+            )
+
+        if provider_name == "anthropic":
+            try:
+                return AnthropicProvider(api_key=self.config.api_keys.anthropic)
+            except LLMUnavailableError as exc:
+                return NullProvider(str(exc))
+
+        return NullProvider(
+            f"Unknown LLM provider '{provider_name}'. Supported values: none, anthropic."
+        )
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.llm_provider.enabled
+
+    @property
+    def llm_provider_name(self) -> str:
+        return self.llm_provider.name
+
+    @property
+    def llm_disabled_reason(self) -> str:
+        return self.llm_provider.disabled_reason
+
+    def require_llm_enabled(self) -> None:
+        if not self.llm_enabled:
+            raise LLMUnavailableError(self.llm_disabled_reason)
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt with memory context"""
@@ -215,18 +255,20 @@ Current time: {datetime.now().strftime('%Y-%m-%d %H:%M')}
     async def _chat_with_claude(self, message: str) -> str:
         """Direct chat with Claude API"""
         try:
+            self.require_llm_enabled()
+
             # Build messages with recent history
             messages = self.conversation_history[-self.config.ai.conversation_memory_limit:]
 
-            response = self.client.messages.create(
+            return await self.llm_provider.complete(
                 model=self.config.ai.model,
                 max_tokens=self.config.ai.max_tokens,
                 system=self.system_prompt,
                 messages=messages,
                 temperature=self.config.ai.temperature,
             )
-
-            return response.content[0].text
+        except LLMUnavailableError:
+            raise
 
         except Exception as e:
             logger.error(f"Claude API error: {e}")
@@ -586,21 +628,23 @@ Minimum history check: {quality_report.get('checks', {}).get('minimum_history', 
 
     async def stream_chat(self, user_message: str) -> AsyncIterator[str]:
         """Stream chat response"""
+        self.require_llm_enabled()
+
         self.db.save_conversation(self.session_id, "user", user_message)
         self.conversation_history.append({"role": "user", "content": user_message})
 
         full_response = ""
 
         try:
-            with self.client.messages.stream(
+            async for text in self.llm_provider.stream(
                 model=self.config.ai.model,
                 max_tokens=self.config.ai.max_tokens,
                 system=self.system_prompt,
                 messages=self.conversation_history[-self.config.ai.conversation_memory_limit:],
-            ) as stream:
-                for text in stream.text_stream:
-                    full_response += text
-                    yield text
+                temperature=self.config.ai.temperature,
+            ):
+                full_response += text
+                yield text
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"

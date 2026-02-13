@@ -3,6 +3,7 @@ Configuration management for dPolaris AI
 """
 
 import os
+import platform
 from pathlib import Path
 from typing import Any, Optional
 import yaml
@@ -56,6 +57,12 @@ class AIConfig(BaseModel):
     """AI behavior configuration"""
     model: str = "claude-sonnet-4-20250514"
     opus_model: str = "claude-opus-4-5-20251101"
+    llm_provider: str = Field(
+        default_factory=lambda: os.getenv(
+            "LLM_PROVIDER",
+            "none" if platform.system().lower().startswith("win") else "anthropic",
+        )
+    )
     temperature: float = 0.3
     max_tokens: int = 8192
     conversation_memory_limit: int = 50
