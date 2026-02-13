@@ -308,6 +308,20 @@ def server(host: str, port: int):
 
 # ==================== Data Commands ====================
 
+@cli.command("build-universe")
+def build_universe():
+    """Build Nasdaq + WSB universes and merged combined universe"""
+    from universe.builder import build_daily_universe_files
+
+    with console.status("[bold green]Building daily universes...[/bold green]"):
+        result = build_daily_universe_files()
+
+    console.print("[green]Universe build completed[/green]")
+    console.print(f"Nasdaq Top 500: {result['nasdaq_top_500']['path']}")
+    console.print(f"WSB Top 500: {result['wsb_top_500']['path']}")
+    console.print(f"Combined 1000: {result['combined_1000']['path']}")
+
+
 @cli.command()
 def backup():
     """Create a backup of all data"""

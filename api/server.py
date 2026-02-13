@@ -5,12 +5,15 @@ Provides REST API and WebSocket endpoints for the Mac app.
 """
 
 import asyncio
+import copy
+import hashlib
 import json
 import os
 import sys
-from datetime import datetime, date, timezone
+from collections import Counter
+from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from contextlib import asynccontextmanager
 import logging
 from uuid import uuid4
@@ -77,11 +80,44 @@ training_jobs: dict[str, dict] = {}
 training_job_order: list[str] = []
 training_job_queue: Optional[asyncio.Queue[str]] = None
 training_job_worker_task: Optional[asyncio.Task] = None
+scan_jobs: dict[str, dict] = {}
+scan_job_order: list[str] = []
+scan_job_queue: Optional[asyncio.Queue[str]] = None
+scan_job_worker_task: Optional[asyncio.Task] = None
 server_started_at: Optional[datetime] = None
 
 SUPPORTED_DL_MODELS = {"lstm", "transformer"}
 MAX_TRAINING_JOBS = 200
 MAX_TRAINING_JOB_LOG_LINES = 500
+MAX_SCAN_JOBS = 100
+MAX_SCAN_JOB_LOG_LINES = 2000
+SCAN_STATE_FILE = "scan_job.json"
+SCAN_INDEX_FILE = "scan_results_index.json"
+SCAN_REQUEST_FILE = "scan_request.json"
+SCAN_RESULTS_DIR = "scan_results"
+DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
+KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
+FALLBACK_UNIVERSE_SYMBOLS = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
+    "AMD", "INTC", "ADBE", "CSCO", "PEP", "QCOM", "TXN", "AMAT", "INTU", "BKNG",
+    "MU", "LRCX", "ADI", "PANW", "KLAC", "CRWD", "MELI", "MAR", "MDLZ", "ADP",
+    "SBUX", "AMGN", "ISRG", "PYPL", "GILD", "REGN", "VRTX", "ABNB", "DASH", "SNPS",
+    "CDNS", "FTNT", "ORLY", "CTAS", "CSX", "ROP", "CMCSA", "TMUS", "PDD", "ASML",
+]
+
+SECTOR_ETF_MAP = {
+    "basic materials": "XLB",
+    "communication services": "XLC",
+    "consumer discretionary": "XLY",
+    "consumer staples": "XLP",
+    "energy": "XLE",
+    "financial services": "XLF",
+    "health care": "XLV",
+    "industrials": "XLI",
+    "real estate": "XLRE",
+    "technology": "XLK",
+    "utilities": "XLU",
+}
 
 
 def utc_now_iso() -> str:
@@ -176,6 +212,955 @@ def _append_training_job_log(job: dict, message: str) -> None:
     logs.append(f"{utc_now_iso()} | {cleaned}")
     if len(logs) > MAX_TRAINING_JOB_LOG_LINES:
         del logs[:-MAX_TRAINING_JOB_LOG_LINES]
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _runs_root() -> Path:
+    raw = os.getenv("DPOLARIS_RUNS_DIR", "runs")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = _repo_root() / path
+    return path
+
+
+def _scan_run_dir(run_id: str) -> Path:
+    return _runs_root() / run_id
+
+
+def _scan_results_dir(run_id: str) -> Path:
+    return _scan_run_dir(run_id) / SCAN_RESULTS_DIR
+
+
+def _scan_state_path(run_id: str) -> Path:
+    return _scan_run_dir(run_id) / SCAN_STATE_FILE
+
+
+def _scan_index_path(run_id: str) -> Path:
+    return _scan_run_dir(run_id) / SCAN_INDEX_FILE
+
+
+def _json_dump(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+
+
+def _json_load(path: Path) -> Optional[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        with open(path) as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            return loaded
+    except Exception:
+        return None
+    return None
+
+
+def _sanitize_symbol(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    if not text:
+        return None
+    if any(ch in text for ch in (" ", "/", "\\", "=")):
+        return None
+    text = text.replace(".", "-")
+    if not text[0].isalpha():
+        return None
+    if len(text) > 10:
+        return None
+    for ch in text:
+        if not (ch.isalnum() or ch == "-"):
+            return None
+    return text
+
+
+def _json_sha256(payload: Any) -> str:
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _universe_with_hash(payload: dict[str, Any]) -> dict[str, Any]:
+    body = dict(payload)
+    body.pop("universe_hash", None)
+    body["universe_hash"] = _json_sha256(body)
+    return body
+
+
+def _fallback_symbols() -> list[str]:
+    raw = os.getenv("DPOLARIS_FALLBACK_SYMBOLS", "")
+    if raw.strip():
+        parsed = [_sanitize_symbol(x) for x in raw.split(",")]
+        cleaned = [x for x in parsed if x]
+        if cleaned:
+            return cleaned
+    return list(FALLBACK_UNIVERSE_SYMBOLS)
+
+
+def _build_fallback_nasdaq_payload(symbols: list[str]) -> dict[str, Any]:
+    generated_at = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {
+            "symbol": symbol,
+            "company_name": symbol,
+            "market_cap": None,
+            "avg_dollar_volume": None,
+            "sector": None,
+            "industry": None,
+        }
+        for symbol in symbols
+    ]
+    payload = {
+        "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "criteria": {
+            "exchange": "NASDAQ",
+            "top_n_requested": 500,
+            "top_n_returned": len(rows),
+            "ranking": "fallback_symbol_list",
+            "liquidity_filter": {
+                "metric": "average_dollar_volume",
+                "min_avg_dollar_volume": 0.0,
+            },
+            "candidate_limit": len(rows),
+        },
+        "data_sources": [
+            {
+                "name": "fallback_symbol_list",
+                "notes": "generated because universe file was missing",
+            }
+        ],
+        "notes": [
+            "Fallback universe generated in API runtime due missing universe file.",
+            "Set DPOLARIS_FALLBACK_SYMBOLS for a custom symbol list.",
+        ],
+        "tickers": rows,
+    }
+    return _universe_with_hash(payload)
+
+
+def _build_fallback_wsb_payload(symbols: list[str]) -> dict[str, Any]:
+    generated = datetime.now(timezone.utc)
+    rows = []
+    total = len(symbols)
+    for idx, symbol in enumerate(symbols, start=1):
+        mentions = max(1, total - idx + 1)
+        rows.append(
+            {
+                "symbol": symbol,
+                "mention_count": mentions,
+                "mention_velocity": round(float(mentions) / 7.0, 6),
+                "sentiment_score": 0.0,
+                "example_post_ids": [],
+                "example_titles": [],
+            }
+        )
+    payload = {
+        "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
+        "generated_at": generated.isoformat(),
+        "window_start": (generated - timedelta(days=7)).isoformat(),
+        "window_end": generated.isoformat(),
+        "criteria": {
+            "top_n_requested": 500,
+            "top_n_returned": len(rows),
+            "window_days": 7,
+            "dedupe": "fallback",
+            "ticker_linking": "fallback",
+        },
+        "source_connector": "fallback_mentions",
+        "data_sources": [
+            {
+                "name": "fallback_mentions",
+                "raw_posts": 0,
+                "deduped_posts": 0,
+            }
+        ],
+        "notes": [
+            "Fallback WSB universe generated in API runtime due missing universe file.",
+            "Replace with scheduled universe build for real mention data.",
+        ],
+        "tickers": rows,
+    }
+    return _universe_with_hash(payload)
+
+
+def _build_fallback_combined_payload(ns_payload: dict[str, Any], ws_payload: dict[str, Any]) -> dict[str, Any]:
+    generated_at = datetime.now(timezone.utc).isoformat()
+    merged: dict[str, dict[str, Any]] = {}
+    for row in (ns_payload.get("tickers") or []):
+        symbol = _sanitize_symbol((row or {}).get("symbol"))
+        if not symbol:
+            continue
+        merged[symbol] = {
+            "symbol": symbol,
+            "company_name": row.get("company_name") or symbol,
+            "market_cap": row.get("market_cap"),
+            "avg_dollar_volume": row.get("avg_dollar_volume"),
+            "sector": row.get("sector"),
+            "industry": row.get("industry"),
+            "mention_count": 0,
+            "mention_velocity": 0.0,
+            "sentiment_score": None,
+            "sources": ["nasdaq_top_500"],
+        }
+    for row in (ws_payload.get("tickers") or []):
+        symbol = _sanitize_symbol((row or {}).get("symbol"))
+        if not symbol:
+            continue
+        item = merged.setdefault(
+            symbol,
+            {
+                "symbol": symbol,
+                "company_name": symbol,
+                "market_cap": None,
+                "avg_dollar_volume": None,
+                "sector": None,
+                "industry": None,
+                "mention_count": 0,
+                "mention_velocity": 0.0,
+                "sentiment_score": None,
+                "sources": [],
+            },
+        )
+        item["mention_count"] = int(row.get("mention_count") or 0)
+        item["mention_velocity"] = float(row.get("mention_velocity") or 0.0)
+        if row.get("sentiment_score") is not None:
+            item["sentiment_score"] = float(row.get("sentiment_score"))
+        if "wsb_top_500" not in item["sources"]:
+            item["sources"].append("wsb_top_500")
+
+    merged_rows = sorted(
+        merged.values(),
+        key=lambda x: (
+            float(x.get("market_cap") or 0.0),
+            float(x.get("avg_dollar_volume") or 0.0),
+            int(x.get("mention_count") or 0),
+            str(x.get("symbol") or ""),
+        ),
+        reverse=True,
+    )[:1000]
+
+    payload = {
+        "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "criteria": {
+            "top_n_requested": 1000,
+            "top_n_returned": len(merged_rows),
+            "duplicate_resolution": "merge_on_symbol",
+        },
+        "data_sources": [
+            {"name": "nasdaq_top_500", "count": len(ns_payload.get("tickers") or [])},
+            {"name": "wsb_top_500", "count": len(ws_payload.get("tickers") or [])},
+        ],
+        "notes": [
+            "Fallback combined universe generated in API runtime due missing universe files.",
+        ],
+        "nasdaq_top_500": ns_payload.get("tickers") or [],
+        "wsb_top_500": ws_payload.get("tickers") or [],
+        "merged": merged_rows,
+    }
+    return _universe_with_hash(payload)
+
+
+def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
+    base_name = (universe_name or "").strip()
+    if base_name.endswith(".json"):
+        base_name = base_name[:-5]
+    if base_name not in KNOWN_UNIVERSE_NAMES:
+        return None
+
+    universe_dir = _repo_root() / "universe"
+    universe_dir.mkdir(parents=True, exist_ok=True)
+    target = universe_dir / f"{base_name}.json"
+    if target.exists() and target.is_file():
+        return target
+
+    symbols = _fallback_symbols()
+    nasdaq_path = universe_dir / "nasdaq_top_500.json"
+    wsb_path = universe_dir / "wsb_top_500.json"
+    combined_path = universe_dir / "combined_1000.json"
+
+    if base_name == "nasdaq_top_500":
+        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols))
+        return nasdaq_path
+
+    if base_name == "wsb_top_500":
+        _json_dump(wsb_path, _build_fallback_wsb_payload(symbols))
+        return wsb_path
+
+    if not nasdaq_path.exists():
+        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols))
+    if not wsb_path.exists():
+        _json_dump(wsb_path, _build_fallback_wsb_payload(symbols))
+
+    ns_payload = _json_load(nasdaq_path) or _build_fallback_nasdaq_payload(symbols)
+    ws_payload = _json_load(wsb_path) or _build_fallback_wsb_payload(symbols)
+    _json_dump(combined_path, _build_fallback_combined_payload(ns_payload, ws_payload))
+    return combined_path
+
+
+def _resolve_universe_path(universe_name: str) -> Path:
+    name = (universe_name or "").strip()
+    if not name:
+        raise ValueError("universe is required")
+
+    candidate = Path(name).expanduser()
+    if candidate.exists() and candidate.is_file():
+        return candidate.resolve()
+
+    root = _repo_root()
+    if not candidate.is_absolute():
+        repo_candidate = (root / candidate).resolve()
+        if repo_candidate.exists() and repo_candidate.is_file():
+            return repo_candidate
+
+    universe_dir = root / "universe"
+    direct_name = f"{name}.json" if not name.endswith(".json") else name
+    for possible in (
+        universe_dir / direct_name,
+        universe_dir / name,
+    ):
+        if possible.exists() and possible.is_file():
+            return possible.resolve()
+
+    generated = _ensure_default_universe_file(name)
+    if generated is not None and generated.exists() and generated.is_file():
+        return generated.resolve()
+
+    raise FileNotFoundError(f"Universe file not found for '{universe_name}'")
+
+
+def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[str, Any]], Path]:
+    path = _resolve_universe_path(universe_name)
+    payload = _json_load(path)
+    if payload is None:
+        raise ValueError(f"Invalid universe JSON: {path}")
+
+    rows: list[Any] = []
+    if isinstance(payload.get("merged"), list):
+        rows = payload.get("merged") or []
+    elif isinstance(payload.get("tickers"), list):
+        rows = payload.get("tickers") or []
+    else:
+        # Fallback to merged list from known keys.
+        rows = (payload.get("nasdaq_top_500") or []) + (payload.get("wsb_top_500") or [])
+
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        if isinstance(raw, str):
+            symbol = _sanitize_symbol(raw)
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            normalized.append(
+                {
+                    "symbol": symbol,
+                    "company_name": symbol,
+                    "sector": None,
+                    "industry": None,
+                    "market_cap": None,
+                    "avg_dollar_volume": None,
+                    "mention_count": None,
+                    "mention_velocity": None,
+                }
+            )
+            continue
+
+        if not isinstance(raw, dict):
+            continue
+        symbol = _sanitize_symbol(raw.get("symbol"))
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        normalized.append(
+            {
+                "symbol": symbol,
+                "company_name": raw.get("company_name") or raw.get("name") or symbol,
+                "sector": raw.get("sector"),
+                "industry": raw.get("industry"),
+                "market_cap": raw.get("market_cap"),
+                "avg_dollar_volume": raw.get("avg_dollar_volume"),
+                "mention_count": raw.get("mention_count"),
+                "mention_velocity": raw.get("mention_velocity"),
+            }
+        )
+
+    if not normalized:
+        raise ValueError(f"No tickers found in universe: {path}")
+    return payload, normalized, path
+
+
+def _short_run_id(run_id: str) -> str:
+    return run_id[:8]
+
+
+def _append_scan_job_log(job: dict[str, Any], message: str) -> None:
+    cleaned = str(message).strip()
+    if not cleaned:
+        return
+
+    logs = job.setdefault("logs", [])
+    logs.append(f"{utc_now_iso()} | {cleaned}")
+    if len(logs) > MAX_SCAN_JOB_LOG_LINES:
+        del logs[:-MAX_SCAN_JOB_LOG_LINES]
+
+
+def _trim_scan_jobs() -> None:
+    if len(scan_job_order) <= MAX_SCAN_JOBS:
+        return
+
+    overflow = len(scan_job_order) - MAX_SCAN_JOBS
+    for _ in range(overflow):
+        old_job_id = scan_job_order.pop(0)
+        job = scan_jobs.get(old_job_id)
+        if job and job.get("status") in {"queued", "running"}:
+            scan_job_order.append(old_job_id)
+            continue
+        scan_jobs.pop(old_job_id, None)
+
+
+def _scan_status_counts(job: dict[str, Any]) -> dict[str, int]:
+    status_counter = Counter()
+    for item in (job.get("ticker_status") or {}).values():
+        status_counter[str((item or {}).get("status") or "queued")] += 1
+    return {
+        "queued": int(status_counter.get("queued", 0)),
+        "running": int(status_counter.get("running", 0)),
+        "completed": int(status_counter.get("completed", 0)),
+        "failed": int(status_counter.get("failed", 0)),
+    }
+
+
+def _refresh_scan_progress(job: dict[str, Any]) -> None:
+    counts = _scan_status_counts(job)
+    total = int(job.get("total_tickers") or 0)
+    processed = counts["completed"] + counts["failed"]
+    progress = (processed / total * 100.0) if total > 0 else 0.0
+
+    job["queued_tickers"] = counts["queued"]
+    job["running_tickers"] = counts["running"]
+    job["completed_tickers"] = counts["completed"]
+    job["failed_tickers"] = counts["failed"]
+    job["progress_percent"] = round(progress, 2)
+
+
+def _public_scan_job(job: dict[str, Any]) -> dict[str, Any]:
+    counts = _scan_status_counts(job)
+    total = int(job.get("total_tickers") or 0)
+    processed = counts["completed"] + counts["failed"]
+    warnings = job.get("warnings") or []
+    errors = job.get("errors") or {}
+    result_index = job.get("result_index") if isinstance(job.get("result_index"), list) else []
+    primary_score = None
+    if result_index:
+        scores = [
+            _safe_float(item.get("primary_score"), np.nan)
+            for item in result_index
+            if isinstance(item, dict)
+        ]
+        finite = [float(x) for x in scores if np.isfinite(x)]
+        if finite:
+            primary_score = max(finite)
+
+    horizon_days = job.get("horizon_days")
+    options_mode = bool(job.get("options_mode"))
+    concurrency = job.get("concurrency")
+    config_summary = f"h={horizon_days}d, options={'on' if options_mode else 'off'}, workers={concurrency}"
+
+    return {
+        "id": job.get("id"),
+        "run_id": job.get("id"),
+        "runId": job.get("id"),
+        "shortRunId": _short_run_id(str(job.get("id") or "")),
+        "status": job.get("status"),
+        "runMode": job.get("run_mode", "scan"),
+        "universe": job.get("universe_name"),
+        "universeHash": job.get("universe_hash"),
+        "universe_hash": job.get("universe_hash"),
+        "horizonDays": horizon_days,
+        "horizon_days": horizon_days,
+        "optionsMode": options_mode,
+        "options_mode": options_mode,
+        "concurrency": concurrency,
+        "config_summary": config_summary,
+        "primary_score": primary_score,
+        "progressPercent": round((processed / total * 100.0), 2) if total > 0 else 0.0,
+        "processedTickers": processed,
+        "totalTickers": total,
+        "completedTickers": counts["completed"],
+        "failedTickers": counts["failed"],
+        "queuedTickers": counts["queued"],
+        "runningTickers": counts["running"],
+        "currentTicker": job.get("current_ticker"),
+        "current_ticker": job.get("current_ticker"),
+        "createdAt": job.get("created_at"),
+        "created_at": job.get("created_at"),
+        "updatedAt": job.get("updated_at"),
+        "updated_at": job.get("updated_at"),
+        "startedAt": job.get("started_at"),
+        "started_at": job.get("started_at"),
+        "completedAt": job.get("completed_at"),
+        "completed_at": job.get("completed_at"),
+        "runDir": job.get("run_dir"),
+        "warnings": warnings[-20:],
+        "errorsSummary": {
+            "count": len(errors),
+            "tickers": sorted(list(errors.keys()))[:20],
+        },
+        "logs": (job.get("logs") or [])[-200:],
+    }
+
+
+def _persist_scan_job_state(job: dict[str, Any]) -> None:
+    run_id = str(job.get("id") or "")
+    if not run_id:
+        return
+    run_dir = _scan_run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    state = copy.deepcopy(job)
+    # Keep state payload compact; run artifacts hold full per-ticker details.
+    state.pop("result_index", None)
+    _json_dump(_scan_state_path(run_id), state)
+    try:
+        _json_dump(run_dir / "run_summary.json", _build_scan_run_summary(job))
+    except Exception:
+        pass
+
+
+def _load_scan_job_state(run_id: str) -> Optional[dict[str, Any]]:
+    payload = _json_load(_scan_state_path(run_id))
+    if payload is None:
+        return None
+    if payload.get("id") is None:
+        payload["id"] = run_id
+    payload.setdefault("result_index", [])
+    payload.setdefault("ticker_status", {})
+    payload.setdefault("warnings", [])
+    payload.setdefault("errors", {})
+    payload.setdefault("logs", [])
+    _refresh_scan_progress(payload)
+    return payload
+
+
+def _load_scan_index(run_id: str) -> list[dict[str, Any]]:
+    path = _scan_index_path(run_id)
+    payload = _json_load(path)
+    if payload and isinstance(payload.get("items"), list):
+        return [x for x in payload.get("items") if isinstance(x, dict)]
+
+    result_dir = _scan_results_dir(run_id)
+    if not result_dir.exists():
+        return []
+
+    items: list[dict[str, Any]] = []
+    for file in sorted(result_dir.glob("*.json")):
+        loaded = _json_load(file)
+        if not loaded:
+            continue
+        summary = loaded.get("summary")
+        if isinstance(summary, dict):
+            items.append(summary)
+    return items
+
+
+def _persist_scan_index(run_id: str, items: list[dict[str, Any]]) -> None:
+    payload = {
+        "run_id": run_id,
+        "generated_at": utc_now_iso(),
+        "count": len(items),
+        "items": items,
+    }
+    _json_dump(_scan_index_path(run_id), payload)
+
+
+def _latest_time_col(df) -> Optional[str]:
+    for col in ("timestamp", "date", "datetime"):
+        if col in df.columns:
+            return col
+    return None
+
+
+def _extract_close_series(df) -> tuple[list[datetime], list[float]]:
+    if df is None or len(df) == 0:
+        return [], []
+    time_col = _latest_time_col(df)
+    if time_col is None or "close" not in df.columns:
+        return [], []
+
+    work = df.copy()
+    work[time_col] = work[time_col].apply(_parse_timestamp)
+    work["close"] = work["close"].apply(lambda x: _safe_float(x, np.nan))
+    work = work.dropna(subset=[time_col, "close"]).sort_values(time_col)
+    if work.empty:
+        return [], []
+    return list(work[time_col]), [float(x) for x in work["close"].tolist()]
+
+
+def _pct_return(closes: list[float], lookback: int) -> Optional[float]:
+    if len(closes) <= int(lookback):
+        return None
+    prev = closes[-(int(lookback) + 1)]
+    if prev == 0:
+        return None
+    return (closes[-1] / prev) - 1.0
+
+
+def _pattern_analogs(
+    times: list[datetime],
+    closes: list[float],
+    *,
+    window: int = 30,
+    horizon: int = 5,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    if len(closes) < (window + horizon + 15):
+        return {
+            "window": window,
+            "horizon": horizon,
+            "top_k": top_k,
+            "analogs": [],
+            "aggregated_outcomes": {
+                "count": 0,
+                "mean_forward_return": None,
+                "median_forward_return": None,
+                "win_rate": None,
+            },
+        }
+
+    arr = np.asarray(closes, dtype=float)
+    rets = np.diff(np.log(np.clip(arr, 1e-9, None)))
+    if len(rets) < (window + horizon + 5):
+        return {
+            "window": window,
+            "horizon": horizon,
+            "top_k": top_k,
+            "analogs": [],
+            "aggregated_outcomes": {
+                "count": 0,
+                "mean_forward_return": None,
+                "median_forward_return": None,
+                "win_rate": None,
+            },
+        }
+
+    latest_start = len(rets) - window
+    latest_vec = rets[latest_start:]
+
+    candidates: list[dict[str, Any]] = []
+    max_end = len(rets) - horizon
+    for end_idx in range(window, max_end):
+        # Prevent overlap with the current window to keep the analog set historical.
+        if end_idx >= latest_start:
+            break
+        start_idx = end_idx - window
+        cand_vec = rets[start_idx:end_idx]
+        if len(cand_vec) != window:
+            continue
+
+        distance = float(np.linalg.norm(cand_vec - latest_vec))
+        anchor_px = arr[end_idx]
+        future_px = arr[end_idx + horizon]
+        if anchor_px == 0:
+            continue
+        forward_return = float((future_px / anchor_px) - 1.0)
+        candidates.append(
+            {
+                "distance": distance,
+                "window_start": times[start_idx + 1].isoformat() if (start_idx + 1) < len(times) else None,
+                "window_end": times[end_idx].isoformat() if end_idx < len(times) else None,
+                "forward_return_horizon": forward_return,
+                "outcome": "up" if forward_return > 0 else "down",
+            }
+        )
+
+    candidates.sort(key=lambda x: x["distance"])
+    selected = candidates[: max(1, int(top_k))]
+
+    fwd_returns = [float(x.get("forward_return_horizon")) for x in selected if x.get("forward_return_horizon") is not None]
+    aggregated = {
+        "count": len(fwd_returns),
+        "mean_forward_return": float(np.mean(fwd_returns)) if fwd_returns else None,
+        "median_forward_return": float(np.median(fwd_returns)) if fwd_returns else None,
+        "win_rate": float(np.mean([x > 0 for x in fwd_returns])) if fwd_returns else None,
+    }
+
+    return {
+        "window": int(window),
+        "horizon": int(horizon),
+        "top_k": int(top_k),
+        "analogs": selected,
+        "aggregated_outcomes": aggregated,
+    }
+
+
+def _sector_etf_for_row(row: dict[str, Any]) -> Optional[str]:
+    raw_sector = str(row.get("sector") or "").strip().lower()
+    if not raw_sector:
+        return None
+    return SECTOR_ETF_MAP.get(raw_sector)
+
+
+def _safe_price(value: Any) -> Optional[float]:
+    numeric = _safe_float(value, np.nan)
+    if np.isfinite(numeric):
+        return float(numeric)
+    return None
+
+
+def _mid_price(bid: Any, ask: Any) -> Optional[float]:
+    b = _safe_price(bid)
+    a = _safe_price(ask)
+    if b is None and a is None:
+        return None
+    if b is None:
+        return a
+    if a is None:
+        return b
+    return (b + a) / 2.0
+
+
+def _options_candidates(
+    *,
+    bias: str,
+    confidence: float,
+    iv_rank: Optional[float],
+    latest_price: float,
+    horizon_days: int,
+) -> list[dict[str, Any]]:
+    confidence = _clamp(float(confidence), 0.0, 1.0)
+    iv_rank = None if iv_rank is None else float(iv_rank)
+    horizon_days = int(max(1, horizon_days))
+    dte = max(14, min(60, horizon_days * 4))
+    expected_move = latest_price * max(0.01, min(0.2, 0.015 + (0.12 * (iv_rank or 0) / 100.0)))
+
+    candidates: list[dict[str, Any]] = []
+    if bias == "LONG":
+        long_call_pop = _clamp(0.45 + (confidence * 0.35), 0.05, 0.95)
+        spread_pop = _clamp(0.52 + (confidence * 0.30), 0.05, 0.95)
+        candidates.extend(
+            [
+                {
+                    "rank": 1,
+                    "strategy_type": "bull_call_spread" if (iv_rank is not None and iv_rank >= 55.0) else "long_call",
+                    "expiry_dte": dte,
+                    "strikes": [round(latest_price, 2), round(latest_price + expected_move, 2)],
+                    "debit_credit": "debit",
+                    "mid_estimate": round(max(0.25, expected_move * 0.35), 2),
+                    "max_loss": round(max(0.25, expected_move * 0.35), 2),
+                    "max_gain": round(max(0.5, expected_move), 2),
+                    "breakevens": [round(latest_price + max(0.25, expected_move * 0.35), 2)],
+                    "pop": round(spread_pop if iv_rank is not None and iv_rank >= 55.0 else long_call_pop, 4),
+                    "ev": round((spread_pop * expected_move) - ((1 - spread_pop) * (expected_move * 0.35)), 4),
+                    "confidence": round(confidence, 4),
+                },
+                {
+                    "rank": 2,
+                    "strategy_type": "cash_secured_put",
+                    "expiry_dte": dte,
+                    "strikes": [round(latest_price * 0.97, 2)],
+                    "debit_credit": "credit",
+                    "mid_estimate": round(max(0.2, expected_move * 0.20), 2),
+                    "max_loss": round(latest_price * 0.97, 2),
+                    "max_gain": round(max(0.2, expected_move * 0.20), 2),
+                    "breakevens": [round((latest_price * 0.97) - max(0.2, expected_move * 0.20), 2)],
+                    "pop": round(_clamp(0.55 + confidence * 0.25, 0.05, 0.98), 4),
+                    "ev": round(expected_move * 0.12, 4),
+                    "confidence": round(_clamp(confidence * 0.95, 0.01, 0.99), 4),
+                },
+            ]
+        )
+    elif bias == "SHORT":
+        put_pop = _clamp(0.45 + (confidence * 0.35), 0.05, 0.95)
+        spread_pop = _clamp(0.52 + (confidence * 0.30), 0.05, 0.95)
+        candidates.extend(
+            [
+                {
+                    "rank": 1,
+                    "strategy_type": "bear_put_spread" if (iv_rank is not None and iv_rank >= 55.0) else "long_put",
+                    "expiry_dte": dte,
+                    "strikes": [round(latest_price, 2), round(max(0.01, latest_price - expected_move), 2)],
+                    "debit_credit": "debit",
+                    "mid_estimate": round(max(0.25, expected_move * 0.35), 2),
+                    "max_loss": round(max(0.25, expected_move * 0.35), 2),
+                    "max_gain": round(max(0.5, expected_move), 2),
+                    "breakevens": [round(latest_price - max(0.25, expected_move * 0.35), 2)],
+                    "pop": round(spread_pop if iv_rank is not None and iv_rank >= 55.0 else put_pop, 4),
+                    "ev": round((spread_pop * expected_move) - ((1 - spread_pop) * (expected_move * 0.35)), 4),
+                    "confidence": round(confidence, 4),
+                },
+                {
+                    "rank": 2,
+                    "strategy_type": "bear_call_spread",
+                    "expiry_dte": dte,
+                    "strikes": [round(latest_price * 1.02, 2), round(latest_price * 1.05, 2)],
+                    "debit_credit": "credit",
+                    "mid_estimate": round(max(0.2, expected_move * 0.18), 2),
+                    "max_loss": round(max(0.35, expected_move * 0.50), 2),
+                    "max_gain": round(max(0.2, expected_move * 0.18), 2),
+                    "breakevens": [round((latest_price * 1.02) + max(0.2, expected_move * 0.18), 2)],
+                    "pop": round(_clamp(0.55 + confidence * 0.22, 0.05, 0.98), 4),
+                    "ev": round(expected_move * 0.08, 4),
+                    "confidence": round(_clamp(confidence * 0.93, 0.01, 0.99), 4),
+                },
+            ]
+        )
+    else:
+        candidates.append(
+            {
+                "rank": 1,
+                "strategy_type": "no_trade",
+                "expiry_dte": dte,
+                "strikes": [],
+                "debit_credit": "n/a",
+                "mid_estimate": 0.0,
+                "max_loss": 0.0,
+                "max_gain": 0.0,
+                "breakevens": [],
+                "pop": 0.0,
+                "ev": 0.0,
+                "confidence": round(confidence, 4),
+            }
+        )
+    return candidates
+
+
+async def _build_options_decision_support(
+    *,
+    symbol: str,
+    bias: str,
+    confidence: float,
+    latest_price: float,
+    horizon_days: int,
+    market: MarketDataService,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    iv_metrics = await market.get_iv_metrics(symbol)
+    option_chain = await market.get_options(symbol)
+
+    iv_level = _safe_float((iv_metrics or {}).get("current_iv"), np.nan)
+    if not np.isfinite(iv_level):
+        iv_level = None
+
+    iv_rank = _safe_float((iv_metrics or {}).get("iv_rank"), np.nan)
+    if not np.isfinite(iv_rank):
+        iv_rank = None
+
+    term_structure_slope = None
+    if option_chain and isinstance(option_chain.get("expirations_available"), list):
+        expirations = [str(x) for x in (option_chain.get("expirations_available") or []) if str(x).strip()]
+        if len(expirations) >= 2:
+            # Approximate: compare current expiration IV with a farther expiration IV if available.
+            near = await market.get_options(symbol, expiration=expirations[0])
+            far = await market.get_options(symbol, expiration=expirations[min(len(expirations) - 1, 2)])
+            near_iv = _safe_float(((near or {}).get("calls") or [{}])[0].get("implied_volatility"), np.nan)
+            far_iv = _safe_float(((far or {}).get("calls") or [{}])[0].get("implied_volatility"), np.nan)
+            if np.isfinite(near_iv) and np.isfinite(far_iv):
+                term_structure_slope = float(far_iv - near_iv)
+
+    if not option_chain:
+        warnings.append("Options chain unavailable; strategy metrics are heuristic estimates.")
+
+    avg_spread = None
+    liquid = True
+    calls = (option_chain or {}).get("calls") or []
+    sampled = calls[:25]
+    spreads = []
+    volumes = []
+    for row in sampled:
+        bid = _safe_price(row.get("bid"))
+        ask = _safe_price(row.get("ask"))
+        mid = _mid_price(bid, ask)
+        vol = _safe_float(row.get("volume"), np.nan)
+        if bid is not None and ask is not None and mid and mid > 0:
+            spreads.append((ask - bid) / mid)
+        if np.isfinite(vol):
+            volumes.append(vol)
+    if spreads:
+        avg_spread = float(np.mean(spreads))
+        if avg_spread > 0.35:
+            liquid = False
+            warnings.append("Wide option spreads detected; execution quality risk is high.")
+    if volumes and float(np.mean(volumes)) < 20:
+        liquid = False
+        warnings.append("Low average options volume; liquidity risk is elevated.")
+
+    candidates = _options_candidates(
+        bias=bias,
+        confidence=confidence,
+        iv_rank=iv_rank,
+        latest_price=latest_price,
+        horizon_days=horizon_days,
+    )
+
+    scenario_moves = [-0.05, -0.02, 0.0, 0.02, 0.05]
+    scenario_rows = []
+    for move in scenario_moves:
+        pnl = 0.0
+        if bias == "LONG":
+            pnl = max(-1.0, move * 40.0)
+        elif bias == "SHORT":
+            pnl = max(-1.0, (-move) * 40.0)
+        scenario_rows.append(
+            {
+                "underlying_move_pct": round(move, 4),
+                "pnl_estimate_r": round(pnl, 4),
+            }
+        )
+
+    return {
+        "enabled": True,
+        "iv_level": iv_level,
+        "iv_rank_percentile": iv_rank,
+        "term_structure_slope": term_structure_slope,
+        "earnings_proximity_days": None,
+        "major_event_flags": [],
+        "candidates": candidates,
+        "scenario_table": scenario_rows,
+        "warnings": warnings,
+        "liquidity_ok": liquid,
+        "avg_relative_spread": avg_spread,
+    }
+
+
+def _scan_summary_row(payload: dict[str, Any]) -> dict[str, Any]:
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        return summary
+    return {
+        "ticker": payload.get("ticker"),
+        "status": payload.get("status", "unknown"),
+        "primary_score": None,
+    }
+
+
+def _update_scan_index(run_id: str, row: dict[str, Any]) -> None:
+    items = _load_scan_index(run_id)
+    ticker = str(row.get("ticker") or "").upper()
+    if ticker:
+        replaced = False
+        for idx, item in enumerate(items):
+            if str(item.get("ticker") or "").upper() == ticker:
+                items[idx] = row
+                replaced = True
+                break
+        if not replaced:
+            items.append(row)
+    _persist_scan_index(run_id, items)
+
+
+def _write_scan_result(run_id: str, ticker: str, payload: dict[str, Any]) -> Path:
+    symbol = _sanitize_symbol(ticker)
+    if not symbol:
+        raise ValueError(f"Invalid ticker symbol: {ticker}")
+    out_path = _scan_results_dir(run_id) / f"{symbol}.json"
+    _json_dump(out_path, payload)
+    return out_path
 
 
 async def _execute_deep_learning_subprocess(
@@ -624,6 +1609,449 @@ def _build_signal_from_features(
     }
 
 
+async def _fetch_history_cached(
+    market: MarketDataService,
+    cache: dict[str, Any],
+    symbol: str,
+    days: int,
+):
+    key = f"{symbol}:{int(days)}"
+    if key not in cache:
+        cache[key] = await market.get_historical(symbol, days=days)
+    frame = cache.get(key)
+    if frame is None:
+        return None
+    try:
+        return frame.copy()
+    except Exception:
+        return frame
+
+
+async def _build_scan_ticker_payload(
+    *,
+    run_id: str,
+    symbol: str,
+    row_meta: dict[str, Any],
+    horizon_days: int,
+    history_days: int,
+    options_mode: bool,
+    market: MarketDataService,
+    history_cache: dict[str, Any],
+    risk_config: dict[str, Any],
+) -> dict[str, Any]:
+    from data.quality import DataQualityGate
+    from data.schema import apply_split_dividend_adjustments, canonicalize_price_frame
+    from ml.features import FeatureEngine
+
+    raw_df = await _fetch_history_cached(market, history_cache, symbol, history_days)
+    if raw_df is None or len(raw_df) < max(260, horizon_days * 60):
+        raise RuntimeError(f"Not enough historical data for {symbol}")
+
+    canonical = canonicalize_price_frame(raw_df, source_timezone="UTC", target_timezone="UTC", intraday=False)
+    canonical = apply_split_dividend_adjustments(canonical)
+
+    quality_gate = DataQualityGate()
+    quality_report_id = f"{run_id}_{symbol}".replace("-", "_")
+    quality_df, quality_report, quality_report_path = quality_gate.run(
+        canonical,
+        symbol=symbol,
+        interval="1d",
+        horizon_days=horizon_days,
+        run_id=quality_report_id,
+        report_dir=_scan_run_dir(run_id) / "reports",
+    )
+
+    if not quality_report.get("checks", {}).get("minimum_history", {}).get("passed", False):
+        required = quality_report.get("checks", {}).get("minimum_history", {}).get("required_rows")
+        actual = quality_report.get("checks", {}).get("minimum_history", {}).get("actual_rows")
+        raise RuntimeError(f"Data quality gate failed minimum history ({actual}/{required}) for {symbol}")
+
+    feature_input = quality_df.rename(columns={"timestamp": "date"})
+    feature_engine = FeatureEngine()
+    feature_df = feature_engine.generate_features(
+        feature_input[["date", "open", "high", "low", "close", "volume"]],
+        include_targets=False,
+    )
+    if feature_df.empty:
+        raise RuntimeError(f"Feature generation failed for {symbol}")
+
+    latest_features = feature_df.iloc[-1]
+    latest_price = _safe_float(quality_df.iloc[-1].get("close"), 0.0)
+    if latest_price <= 0:
+        raise RuntimeError(f"Invalid latest price for {symbol}")
+
+    prediction = _predict_symbol_direction(symbol, feature_input)
+    signal = _build_signal_from_features(
+        symbol=symbol,
+        latest_price=latest_price,
+        latest_features=latest_features,
+        prediction=prediction,
+        horizon_days=horizon_days,
+    )
+
+    raw_feature_map = {}
+    for name in feature_engine.get_feature_names():
+        raw_feature_map[name] = latest_features.get(name)
+
+    regime = derive_regime(raw_feature_map) if derive_regime is not None else {
+        "label": "unknown",
+        "trend": "UNKNOWN",
+        "volatility": "UNKNOWN",
+        "momentum": "UNKNOWN",
+    }
+
+    times, closes = _extract_close_series(feature_input)
+    ticker_ret_20 = _pct_return(closes, 20)
+    ticker_ret_60 = _pct_return(closes, 60)
+
+    qqq_df = await _fetch_history_cached(market, history_cache, "QQQ", history_days)
+    qqq_times, qqq_closes = _extract_close_series(qqq_df)
+    qqq_ret_20 = _pct_return(qqq_closes, 20)
+    rel_vs_qqq = None
+    if ticker_ret_20 is not None and qqq_ret_20 is not None:
+        rel_vs_qqq = ticker_ret_20 - qqq_ret_20
+
+    sector_symbol = _sector_etf_for_row(row_meta)
+    sector_ret_20 = None
+    rel_vs_sector = None
+    if sector_symbol:
+        sec_df = await _fetch_history_cached(market, history_cache, sector_symbol, history_days)
+        _, sec_closes = _extract_close_series(sec_df)
+        sector_ret_20 = _pct_return(sec_closes, 20)
+        if ticker_ret_20 is not None and sector_ret_20 is not None:
+            rel_vs_sector = ticker_ret_20 - sector_ret_20
+
+    adx_value = _safe_float(latest_features.get("adx"), 0.0)
+    vol_20 = _safe_float(latest_features.get("hvol_20"), 0.0)
+    trend_state = "trend" if adx_value >= 20 else "chop"
+    vol_state = "high_vol" if vol_20 >= 0.40 else ("low_vol" if vol_20 <= 0.18 else "mid_vol")
+    risk_proxy = "risk_on"
+    if qqq_ret_20 is not None and qqq_ret_20 < 0:
+        risk_proxy = "risk_off"
+
+    gap = None
+    if len(closes) >= 2:
+        prev_close = closes[-2]
+        if prev_close > 0:
+            gap = (latest_price / prev_close) - 1.0
+
+    recent_high = max(closes[-20:]) if len(closes) >= 20 else max(closes)
+    recent_low = min(closes[-20:]) if len(closes) >= 20 else min(closes)
+    dist_to_high = ((latest_price / recent_high) - 1.0) if recent_high > 0 else None
+    dist_to_low = ((latest_price / recent_low) - 1.0) if recent_low > 0 else None
+
+    pattern_analogs = _pattern_analogs(
+        times=times,
+        closes=closes,
+        window=max(20, min(45, horizon_days * 6)),
+        horizon=max(1, horizon_days),
+        top_k=5,
+    )
+
+    options_support = {
+        "enabled": False,
+        "warnings": [],
+        "candidates": [],
+    }
+    if options_mode:
+        options_support = await _build_options_decision_support(
+            symbol=symbol,
+            bias=str(signal.get("bias") or "NO_TRADE"),
+            confidence=_safe_float(signal.get("confidence"), 0.5),
+            latest_price=latest_price,
+            horizon_days=horizon_days,
+            market=market,
+        )
+
+    risk_mode = "standard"
+    confidence = _safe_float(signal.get("confidence"), 0.5)
+    if confidence < 0.58 or vol_state == "high_vol":
+        risk_mode = "conservative"
+    elif confidence >= 0.75 and vol_state == "low_vol":
+        risk_mode = "aggressive"
+
+    risk_summary = {
+        "position_sizing_guidance": risk_mode,
+        "stop_suggestion": (signal.get("risk") or {}).get("stop_loss"),
+        "profit_take_suggestions": [x.get("price") for x in (signal.get("targets") or []) if x.get("price") is not None],
+        "hard_warnings": list((signal.get("risk_flags") or [])) + list(options_support.get("warnings") or []),
+        "risk_config": risk_config or {},
+    }
+
+    now_iso = utc_now_iso()
+    price_asof = times[-1].isoformat() if times else now_iso
+    traceability = {
+        "model": {
+            "source": prediction.get("source"),
+            "name": prediction.get("model_name"),
+            "type": prediction.get("model_type"),
+            "version": prediction.get("model_version"),
+            "training_run_id": prediction.get("run_id"),
+        },
+        "features_used": feature_engine.get_feature_names(),
+        "top_contributing_features": signal.get("top_features", []),
+        "data_quality_flags": quality_report.get("checks", {}),
+        "missing_data_fallbacks": options_support.get("warnings", []),
+        "asof_timestamps": {
+            "price": price_asof,
+            "benchmark_qqq": qqq_times[-1].isoformat() if qqq_times else None,
+            "sector": sector_symbol,
+        },
+        "quality_report_path": str(quality_report_path),
+    }
+
+    pattern_section = {
+        "recent_trend_stats": {
+            "return_20d": ticker_ret_20,
+            "return_60d": ticker_ret_60,
+            "adx": adx_value,
+            "hvol_20": vol_20,
+            "rsi_14": _safe_float(latest_features.get("rsi_14"), np.nan),
+        },
+        "momentum_stats": {
+            "roc_5": _safe_float(latest_features.get("roc_5"), np.nan),
+            "roc_10": _safe_float(latest_features.get("roc_10"), np.nan),
+            "roc_20": _safe_float(latest_features.get("roc_20"), np.nan),
+        },
+        "anomaly_signals": {
+            "volume_spike": bool(_safe_float(latest_features.get("vol_ratio_20"), 1.0) >= 1.8),
+            "gap_risk_proxy": gap,
+            "gap_flag": bool(abs(gap) >= 0.02) if gap is not None else False,
+        },
+        "support_resistance": {
+            "recent_high_20": recent_high,
+            "recent_low_20": recent_low,
+            "distance_to_high": dist_to_high,
+            "distance_to_low": dist_to_low,
+            "breakout_flag": bool(dist_to_high is not None and dist_to_high > 0),
+            "breakdown_flag": bool(dist_to_low is not None and dist_to_low < 0),
+        },
+        "pattern_analogs": pattern_analogs,
+    }
+
+    market_context = {
+        "regime_label": regime.get("label"),
+        "regime_components": {
+            "trend_state": trend_state,
+            "volatility_state": vol_state,
+            "risk_proxy": risk_proxy,
+        },
+        "relative_strength": {
+            "vs_qqq_20d": rel_vs_qqq,
+            "vs_sector_20d": rel_vs_sector,
+            "benchmark_return_20d": qqq_ret_20,
+            "sector_return_20d": sector_ret_20,
+            "sector_etf": sector_symbol,
+        },
+    }
+
+    summary = {
+        "ticker": symbol,
+        "status": "completed",
+        "primary_score": confidence,
+        "bias": signal.get("bias"),
+        "confidence": confidence,
+        "model_type": prediction.get("model_type"),
+        "target_horizon": horizon_days,
+        "dataset_range": {
+            "start": times[0].isoformat() if times else None,
+            "end": times[-1].isoformat() if times else None,
+            "bars": len(times),
+        },
+        "regime_label": market_context.get("regime_label"),
+        "updated_at": now_iso,
+    }
+
+    return {
+        "run_id": run_id,
+        "ticker": symbol,
+        "status": "completed",
+        "generated_at": now_iso,
+        "market_context": market_context,
+        "price_volume_pattern_analysis": pattern_section,
+        "options_decision_support": options_support,
+        "risk_summary": risk_summary,
+        "traceability": traceability,
+        "signal": signal,
+        "prediction": prediction,
+        "summary": summary,
+    }
+
+
+def _mark_scan_ticker_status(
+    job: dict[str, Any],
+    symbol: str,
+    *,
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    ticker_status = job.setdefault("ticker_status", {})
+    entry = dict(ticker_status.get(symbol) or {})
+    now = utc_now_iso()
+    entry["status"] = status
+    entry["updated_at"] = now
+    if status == "running":
+        entry["started_at"] = now
+    else:
+        entry.setdefault("started_at", now)
+    if status in {"completed", "failed"}:
+        entry["completed_at"] = now
+    if error:
+        entry["error"] = str(error)
+    elif status == "completed":
+        entry["error"] = None
+    ticker_status[symbol] = entry
+    _refresh_scan_progress(job)
+
+
+async def _run_scan_job(run_id: str) -> None:
+    job = scan_jobs.get(run_id)
+    if job is None:
+        job = _load_scan_job_state(run_id)
+        if job is None:
+            return
+        scan_jobs[run_id] = job
+        if run_id not in scan_job_order:
+            scan_job_order.append(run_id)
+            _trim_scan_jobs()
+
+    run_dir = _scan_run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _scan_results_dir(run_id).mkdir(parents=True, exist_ok=True)
+
+    job["status"] = "running"
+    job["started_at"] = job.get("started_at") or utc_now_iso()
+    job["updated_at"] = utc_now_iso()
+    _append_scan_job_log(job, "Started deep-learning scan job")
+    _persist_scan_job_state(job)
+
+    rows = list(job.get("universe_rows") or [])
+    if not rows:
+        job["status"] = "failed"
+        job["error"] = "Universe rows are empty"
+        job["completed_at"] = utc_now_iso()
+        job["updated_at"] = job["completed_at"]
+        _append_scan_job_log(job, "Scan failed: no universe rows")
+        _persist_scan_job_state(job)
+        return
+
+    options_mode = bool(job.get("options_mode", False))
+    horizon_days = int(job.get("horizon_days", 5))
+    history_days = int(job.get("history_days", 3650))
+    concurrency = int(job.get("concurrency", 8))
+    risk_cfg = dict(job.get("risk_config") or {})
+    force_recompute = bool(job.get("force_recompute", False))
+
+    market = market_service or MarketDataService()
+    history_cache: dict[str, Any] = {}
+    lock = asyncio.Lock()
+    sem = asyncio.Semaphore(max(1, min(concurrency, 64)))
+
+    async def _process(row_meta: dict[str, Any]) -> None:
+        symbol = _sanitize_symbol(row_meta.get("symbol"))
+        if not symbol:
+            return
+        existing_status = ((job.get("ticker_status") or {}).get(symbol) or {}).get("status")
+        out_path = _scan_results_dir(run_id) / f"{symbol}.json"
+        if (not force_recompute) and existing_status == "completed" and out_path.exists():
+            async with lock:
+                _mark_scan_ticker_status(job, symbol, status="completed")
+                _append_scan_job_log(job, f"Skipped {symbol} (already completed)")
+                job["updated_at"] = utc_now_iso()
+                _persist_scan_job_state(job)
+            return
+
+        async with lock:
+            _mark_scan_ticker_status(job, symbol, status="running")
+            job["current_ticker"] = symbol
+            job["updated_at"] = utc_now_iso()
+            _persist_scan_job_state(job)
+
+        async with sem:
+            try:
+                payload = await _build_scan_ticker_payload(
+                    run_id=run_id,
+                    symbol=symbol,
+                    row_meta=row_meta,
+                    horizon_days=horizon_days,
+                    history_days=history_days,
+                    options_mode=options_mode,
+                    market=market,
+                    history_cache=history_cache,
+                    risk_config=risk_cfg,
+                )
+                _write_scan_result(run_id, symbol, payload)
+                row = _scan_summary_row(payload)
+                async with lock:
+                    _mark_scan_ticker_status(job, symbol, status="completed")
+                    (job.setdefault("errors", {})).pop(symbol, None)
+                    _update_scan_index(run_id, row)
+                    _append_scan_job_log(job, f"Completed {symbol} (score={_safe_float(row.get('primary_score'), 0.0):.3f})")
+                    job["updated_at"] = utc_now_iso()
+                    _persist_scan_job_state(job)
+            except Exception as exc:
+                err_payload = {
+                    "run_id": run_id,
+                    "ticker": symbol,
+                    "status": "failed",
+                    "generated_at": utc_now_iso(),
+                    "error": str(exc),
+                    "summary": {
+                        "ticker": symbol,
+                        "status": "failed",
+                        "primary_score": None,
+                        "bias": None,
+                        "confidence": None,
+                        "model_type": None,
+                        "target_horizon": horizon_days,
+                        "dataset_range": {},
+                        "regime_label": None,
+                        "updated_at": utc_now_iso(),
+                    },
+                }
+                _write_scan_result(run_id, symbol, err_payload)
+                async with lock:
+                    _mark_scan_ticker_status(job, symbol, status="failed", error=str(exc))
+                    errors = job.setdefault("errors", {})
+                    errors[symbol] = str(exc)
+                    _update_scan_index(run_id, _scan_summary_row(err_payload))
+                    _append_scan_job_log(job, f"Failed {symbol}: {exc}")
+                    job["updated_at"] = utc_now_iso()
+                    _persist_scan_job_state(job)
+
+    await asyncio.gather(*[_process(row) for row in rows])
+
+    counts = _scan_status_counts(job)
+    now = utc_now_iso()
+    if counts["completed"] > 0:
+        job["status"] = "completed"
+    else:
+        job["status"] = "failed"
+    job["current_ticker"] = None
+    job["completed_at"] = now
+    job["updated_at"] = now
+    _append_scan_job_log(
+        job,
+        f"Scan finished: completed={counts['completed']} failed={counts['failed']} total={job.get('total_tickers')}",
+    )
+    _persist_scan_job_state(job)
+
+
+async def _scan_job_worker() -> None:
+    logger.info("Deep-learning scan worker online")
+    while True:
+        assert scan_job_queue is not None
+        run_id = await scan_job_queue.get()
+        try:
+            await _run_scan_job(run_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Unexpected error while processing scan job %s", run_id)
+        finally:
+            scan_job_queue.task_done()
+
+
 async def _run_deep_learning_job(job_id: str) -> None:
     job = training_jobs.get(job_id)
     if job is None:
@@ -736,6 +2164,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler"""
     global config, db, memory, ai, market_service, self_critique_logger
     global training_jobs, training_job_order, training_job_queue, training_job_worker_task
+    global scan_jobs, scan_job_order, scan_job_queue, scan_job_worker_task
     global server_started_at
 
     # Startup
@@ -751,6 +2180,10 @@ async def lifespan(app: FastAPI):
     training_job_order = []
     training_job_queue = asyncio.Queue()
     training_job_worker_task = asyncio.create_task(_deep_learning_job_worker())
+    scan_jobs = {}
+    scan_job_order = []
+    scan_job_queue = asyncio.Queue()
+    scan_job_worker_task = asyncio.create_task(_scan_job_worker())
     server_started_at = datetime.utcnow()
     logger.info("dPolaris API started")
 
@@ -765,6 +2198,16 @@ async def lifespan(app: FastAPI):
             pass
         training_job_worker_task = None
     training_job_queue = None
+
+    if scan_job_worker_task is not None:
+        scan_job_worker_task.cancel()
+        try:
+            await scan_job_worker_task
+        except asyncio.CancelledError:
+            pass
+        scan_job_worker_task = None
+    scan_job_queue = None
+
     server_started_at = None
     self_critique_logger = None
 
@@ -861,6 +2304,21 @@ class DeepLearningTrainJobRequest(BaseModel):
     symbol: str
     model_type: str = Field(default="lstm")
     epochs: int = Field(default=50, ge=1, le=500)
+
+
+class ScanStartRequest(BaseModel):
+    universe: str = Field(default="combined_1000")
+    run_mode: str = Field(default="scan", alias="runMode")
+    horizon_config: dict[str, Any] = Field(default_factory=dict, alias="horizonConfig")
+    options_mode: bool = Field(default=False, alias="optionsMode")
+    strategy_universe_config: dict[str, Any] = Field(default_factory=dict, alias="strategyUniverseConfig")
+    risk_config: dict[str, Any] = Field(default_factory=dict, alias="riskConfig")
+    run_id: Optional[str] = Field(default=None, alias="runId")
+    force_recompute: bool = Field(default=False, alias="forceRecompute")
+    concurrency: Optional[int] = None
+    tickers: Optional[list[str]] = None
+
+    model_config = {"populate_by_name": True}
 
 
 # ==================== REST Endpoints ====================
@@ -1219,6 +2677,439 @@ async def scout():
     """Run opportunity scanner"""
     response = await ai.chat("@scout")
     return {"report": response, "timestamp": datetime.now().isoformat()}
+
+
+# --- Deep Learning Scan ---
+def _normalize_run_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    allowed = []
+    for ch in text:
+        if ch.isalnum() or ch in {"-", "_"}:
+            allowed.append(ch)
+    normalized = "".join(allowed)
+    if not normalized:
+        return None
+    return normalized[:64]
+
+
+def _int_from_map(source: dict[str, Any], keys: list[str], default: int) -> int:
+    for key in keys:
+        raw = source.get(key)
+        if raw is None:
+            continue
+        try:
+            return int(raw)
+        except Exception:
+            continue
+    return int(default)
+
+
+def _build_scan_run_summary(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": job.get("id"),
+        "type": "deep_learning_scan",
+        "status": job.get("status"),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "started_at": job.get("started_at"),
+        "completed_at": job.get("completed_at"),
+        "universe": job.get("universe_name"),
+        "universe_hash": job.get("universe_hash"),
+        "run_mode": job.get("run_mode"),
+        "horizon_days": job.get("horizon_days"),
+        "history_days": job.get("history_days"),
+        "options_mode": job.get("options_mode"),
+        "concurrency": job.get("concurrency"),
+        "total_tickers": job.get("total_tickers"),
+        "progress_percent": job.get("progress_percent"),
+    }
+
+
+def _public_scan_run_from_summary(run_id: str, summary: dict[str, Any], index_items: list[dict[str, Any]]) -> dict[str, Any]:
+    completed = 0
+    failed = 0
+    primary_score = None
+    scores: list[float] = []
+    for row in index_items:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").lower()
+        if status == "completed":
+            completed += 1
+        elif status == "failed":
+            failed += 1
+        score = _safe_float(row.get("primary_score"), np.nan)
+        if np.isfinite(score):
+            scores.append(float(score))
+    if scores:
+        primary_score = max(scores)
+
+    total = int(summary.get("total_tickers") or len(index_items) or 0)
+    if total <= 0:
+        total = max(completed + failed, len(index_items))
+    processed = completed + failed
+    progress = summary.get("progress_percent")
+    if not isinstance(progress, (int, float)):
+        progress = (processed / total * 100.0) if total > 0 else 0.0
+    progress = float(progress)
+    queued = max(0, total - processed)
+
+    run_mode = summary.get("run_mode") or "scan"
+    horizon_days = summary.get("horizon_days")
+    options_mode = bool(summary.get("options_mode"))
+    concurrency = summary.get("concurrency")
+    config_summary = f"h={horizon_days}d, options={'on' if options_mode else 'off'}, workers={concurrency}"
+    status = str(summary.get("status") or ("completed" if total > 0 and processed >= total else "unknown"))
+
+    return {
+        "id": run_id,
+        "run_id": run_id,
+        "runId": run_id,
+        "shortRunId": _short_run_id(run_id),
+        "status": status,
+        "runMode": run_mode,
+        "run_mode": run_mode,
+        "universe": summary.get("universe"),
+        "universeHash": summary.get("universe_hash"),
+        "universe_hash": summary.get("universe_hash"),
+        "horizonDays": horizon_days,
+        "horizon_days": horizon_days,
+        "optionsMode": options_mode,
+        "options_mode": options_mode,
+        "concurrency": concurrency,
+        "config_summary": config_summary,
+        "primary_score": primary_score,
+        "progressPercent": round(progress, 2),
+        "processedTickers": processed,
+        "totalTickers": total,
+        "completedTickers": completed,
+        "failedTickers": failed,
+        "queuedTickers": queued,
+        "runningTickers": 0,
+        "currentTicker": None,
+        "current_ticker": None,
+        "createdAt": summary.get("created_at"),
+        "created_at": summary.get("created_at"),
+        "updatedAt": summary.get("updated_at"),
+        "updated_at": summary.get("updated_at"),
+        "startedAt": summary.get("started_at"),
+        "started_at": summary.get("started_at"),
+        "completedAt": summary.get("completed_at"),
+        "completed_at": summary.get("completed_at"),
+        "runDir": str(_scan_run_dir(run_id)),
+        "warnings": [],
+        "errorsSummary": {"count": 0, "tickers": []},
+        "logs": [],
+    }
+
+
+def _collect_scan_run_ids() -> list[str]:
+    run_ids: set[str] = {str(x) for x in scan_job_order if str(x).strip()}
+    root = _runs_root()
+    if root.exists() and root.is_dir():
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            run_id = child.name
+            if (
+                _scan_state_path(run_id).exists()
+                or _scan_index_path(run_id).exists()
+                or (child / "run_summary.json").exists()
+            ):
+                run_ids.add(run_id)
+    return sorted(run_ids)
+
+
+def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, Any]]:
+    wanted = str(status_filter or "").strip().lower()
+    rows: list[dict[str, Any]] = []
+    for run_id in _collect_scan_run_ids():
+        job = scan_jobs.get(run_id) or _load_scan_job_state(run_id)
+        if job is not None:
+            public = _public_scan_job(job)
+        else:
+            run_dir = _scan_run_dir(run_id)
+            summary = _json_load(run_dir / "run_summary.json") or {}
+            if not summary:
+                continue
+            index_items = _load_scan_index(run_id)
+            public = _public_scan_run_from_summary(run_id, summary, index_items)
+
+        state = str(public.get("status") or "").strip().lower()
+        if wanted and state != wanted:
+            continue
+        rows.append(public)
+
+    def _sort_key(item: dict[str, Any]) -> datetime:
+        for key in ("updatedAt", "completedAt", "startedAt", "createdAt", "updated_at", "completed_at", "started_at", "created_at"):
+            parsed = _parse_timestamp(item.get(key))
+            if parsed is not None:
+                return parsed
+        return datetime.min
+
+    rows.sort(key=_sort_key, reverse=True)
+    return rows[: max(1, int(limit))]
+
+
+@app.get("/scan/universe")
+@app.get("/api/scan/universe")
+async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
+    return await get_scan_universe(name)
+
+
+@app.get("/scan/universe/{universe_name}")
+@app.get("/api/scan/universe/{universe_name}")
+@app.get("/universe/{universe_name}")
+@app.get("/api/universe/{universe_name}")
+async def get_scan_universe(universe_name: str):
+    try:
+        payload, rows, path = _load_scan_universe(universe_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "name": universe_name,
+        "path": str(path),
+        "generated_at": payload.get("generated_at"),
+        "universe_hash": payload.get("universe_hash"),
+        "schema_version": payload.get("schema_version"),
+        "count": len(rows),
+        "universe": payload,
+    }
+
+
+@app.get("/scan/runs")
+@app.get("/api/scan/runs")
+async def list_scan_runs_endpoint(
+    limit: int = Query(100, ge=1, le=1000),
+    status: Optional[str] = Query(None),
+):
+    rows = _list_scan_runs(limit=limit, status_filter=status)
+    return {"runs": rows, "count": len(rows)}
+
+
+@app.post("/scan/start")
+@app.post("/api/scan/start")
+async def start_scan(request: ScanStartRequest):
+    """Start (or resume) a deep-learning scan over a configured universe."""
+    if scan_job_queue is None:
+        raise HTTPException(status_code=503, detail="Scan queue is not ready")
+
+    try:
+        universe_payload, universe_rows, universe_path = _load_scan_universe(request.universe)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if request.tickers:
+        wanted = {_sanitize_symbol(x) for x in request.tickers}
+        wanted = {x for x in wanted if x}
+        if wanted:
+            universe_rows = [row for row in universe_rows if row.get("symbol") in wanted]
+        if not universe_rows:
+            raise HTTPException(status_code=400, detail="Requested tickers are not present in selected universe")
+
+    requested_run_id = _normalize_run_id(request.run_id)
+    run_id = requested_run_id or f"scan_{uuid4().hex[:12]}"
+    if requested_run_id is None:
+        while _scan_run_dir(run_id).exists():
+            run_id = f"scan_{uuid4().hex[:12]}"
+
+    run_dir = _scan_run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _scan_results_dir(run_id).mkdir(parents=True, exist_ok=True)
+
+    existing = _load_scan_job_state(run_id)
+    force_recompute = bool(request.force_recompute)
+    if existing and not force_recompute:
+        status = str(existing.get("status") or "unknown")
+        if status == "completed":
+            return {
+                "runId": run_id,
+                "status": "completed",
+                "statusUrl": f"/scan/status/{run_id}",
+                "resultsUrl": f"/scan/results/{run_id}",
+            }
+
+        existing["status"] = "queued"
+        existing["updated_at"] = utc_now_iso()
+        scan_jobs[run_id] = existing
+        if run_id not in scan_job_order:
+            scan_job_order.append(run_id)
+            _trim_scan_jobs()
+        await scan_job_queue.put(run_id)
+        _persist_scan_job_state(existing)
+        _json_dump(run_dir / "run_summary.json", _build_scan_run_summary(existing))
+        return {
+            "runId": run_id,
+            "status": "queued",
+            "statusUrl": f"/scan/status/{run_id}",
+            "resultsUrl": f"/scan/results/{run_id}",
+        }
+
+    if force_recompute:
+        results_dir = _scan_results_dir(run_id)
+        for old in results_dir.glob("*.json"):
+            try:
+                old.unlink()
+            except Exception:
+                pass
+
+    horizon_cfg = dict(request.horizon_config or {})
+    strategy_cfg = dict(request.strategy_universe_config or {})
+    risk_cfg = dict(request.risk_config or {})
+    history_days = _int_from_map(
+        source=horizon_cfg,
+        keys=["historyDays", "history_days", "lookbackDays", "lookback_days"],
+        default=int(os.getenv("DPOLARIS_SCAN_HISTORY_DAYS", "3650")),
+    )
+    horizon_days = _int_from_map(
+        source=horizon_cfg,
+        keys=["horizonDays", "horizon_days", "days", "horizon"],
+        default=5,
+    )
+    workers = request.concurrency
+    if workers is None:
+        workers = _int_from_map(
+            source=strategy_cfg,
+            keys=["concurrency", "workers", "workerCount"],
+            default=int(os.getenv("DPOLARIS_SCAN_WORKERS", "8")),
+        )
+
+    now = utc_now_iso()
+    ticker_status = {
+        row["symbol"]: {
+            "status": "queued",
+            "started_at": None,
+            "completed_at": None,
+            "updated_at": now,
+            "error": None,
+        }
+        for row in universe_rows
+    }
+
+    job = {
+        "id": run_id,
+        "status": "queued",
+        "type": "deep_learning_scan",
+        "run_mode": request.run_mode,
+        "universe_name": request.universe,
+        "universe_hash": universe_payload.get("universe_hash"),
+        "universe_path": str(universe_path),
+        "run_dir": str(run_dir),
+        "created_at": now,
+        "updated_at": now,
+        "started_at": None,
+        "completed_at": None,
+        "current_ticker": None,
+        "horizon_days": max(1, min(horizon_days, 90)),
+        "history_days": max(120, min(history_days, 10000)),
+        "options_mode": bool(request.options_mode),
+        "risk_config": risk_cfg,
+        "strategy_universe_config": strategy_cfg,
+        "horizon_config": horizon_cfg,
+        "force_recompute": force_recompute,
+        "concurrency": max(1, min(int(workers), 64)),
+        "total_tickers": len(universe_rows),
+        "ticker_status": ticker_status,
+        "warnings": [],
+        "errors": {},
+        "logs": [],
+        "result_index": [],
+        "request": request.model_dump(by_alias=True),
+        "universe_rows": universe_rows,
+    }
+    _refresh_scan_progress(job)
+    _append_scan_job_log(job, f"Job queued for {len(universe_rows)} tickers from universe '{request.universe}'")
+
+    _json_dump(run_dir / "universe_snapshot.json", universe_payload)
+    _json_dump(run_dir / SCAN_REQUEST_FILE, request.model_dump(by_alias=True))
+    _persist_scan_index(run_id, [])
+    _persist_scan_job_state(job)
+    _json_dump(run_dir / "run_summary.json", _build_scan_run_summary(job))
+
+    scan_jobs[run_id] = job
+    if run_id not in scan_job_order:
+        scan_job_order.append(run_id)
+    _trim_scan_jobs()
+    await scan_job_queue.put(run_id)
+
+    return {
+        "runId": run_id,
+        "status": "queued",
+        "statusUrl": f"/scan/status/{run_id}",
+        "resultsUrl": f"/scan/results/{run_id}",
+    }
+
+
+@app.get("/scan/status/{run_id}")
+@app.get("/api/scan/status/{run_id}")
+async def get_scan_status(run_id: str):
+    job = scan_jobs.get(run_id) or _load_scan_job_state(run_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Scan run not found: {run_id}")
+    return _public_scan_job(job)
+
+
+@app.get("/scan/results/{run_id}")
+@app.get("/api/scan/results/{run_id}")
+async def get_scan_results(
+    run_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, alias="pageSize", ge=1, le=500),
+    status: Optional[str] = Query(None),
+):
+    state = scan_jobs.get(run_id) or _load_scan_job_state(run_id)
+    run_dir = _scan_run_dir(run_id)
+    if state is None and not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Scan run not found: {run_id}")
+
+    items = _load_scan_index(run_id)
+    if status:
+        wanted = status.strip().lower()
+        items = [x for x in items if str(x.get("status", "")).lower() == wanted]
+
+    def _sort_key(item: dict[str, Any]):
+        score = item.get("primary_score")
+        if isinstance(score, (int, float)):
+            return (0, -float(score), str(item.get("ticker") or ""))
+        return (1, 0.0, str(item.get("ticker") or ""))
+
+    items = sorted(items, key=_sort_key)
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged = items[start:end]
+
+    return {
+        "runId": run_id,
+        "status": (state or {}).get("status"),
+        "page": page,
+        "pageSize": page_size,
+        "total": total,
+        "count": len(paged),
+        "items": paged,
+    }
+
+
+@app.get("/scan/result/{run_id}/{ticker}")
+@app.get("/api/scan/result/{run_id}/{ticker}")
+async def get_scan_result_detail(run_id: str, ticker: str):
+    symbol = _sanitize_symbol(ticker)
+    if not symbol:
+        raise HTTPException(status_code=400, detail=f"Invalid ticker: {ticker}")
+    path = _scan_results_dir(run_id) / f"{symbol}.json"
+    loaded = _json_load(path)
+    if loaded is None:
+        raise HTTPException(status_code=404, detail=f"Scan result not found for {symbol} in run {run_id}")
+    return loaded
 
 
 # --- Market Data ---

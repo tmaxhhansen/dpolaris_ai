@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -108,6 +109,7 @@ def test_training_artifact_schema_v1_and_run_folder_layout(tmp_path):
     assert (run_dir / "manifest.json").exists()
     assert (run_dir / "run_summary.json").exists()
     assert (run_dir / "metrics_summary.json").exists()
+    assert (run_dir / "universe_snapshot.json").exists()
 
     artifact = load_training_artifact(run_id, run_root=run_root)
     schema_dir = Path("/Users/darrenwon/my-git/dpolaris_ai/schemas")
@@ -209,3 +211,45 @@ def test_run_listing_artifact_listing_and_compare(tmp_path):
     assert len(comparison["compared"]) == 2
     assert comparison["best"]["best_f1_run"] == b["run_id"]
     assert comparison["best"]["best_sharpe_run"] == b["run_id"]
+
+
+
+def test_universe_snapshot_hash_is_persisted(tmp_path):
+    run_root = tmp_path / "runs"
+
+    provided_universe = {
+        "schema_version": "1.0.0",
+        "generated_at": "2026-02-10T00:00:00Z",
+        "merged": [{"symbol": "SPY", "sources": ["nasdaq_top_500"]}],
+    }
+
+    artifact_info = write_training_artifact(
+        run_id="contract_run_universe",
+        status="completed",
+        model_type="xgboost",
+        target="target_direction",
+        horizon=5,
+        tickers=["SPY"],
+        timeframes=["1d"],
+        universe_snapshot=provided_universe,
+        run_root=run_root,
+    )
+
+    run_id = artifact_info["run_id"]
+    run_dir = Path(artifact_info["run_dir"])
+
+    with open(run_dir / "universe_snapshot.json") as f:
+        snapshot = json.load(f)
+
+    canonical = dict(snapshot)
+    canonical.pop("universe_hash", None)
+    expected_hash = hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+    assert snapshot["universe_hash"] == expected_hash
+
+    artifact = load_training_artifact(run_id, run_root=run_root)
+    assert artifact["run_summary"]["universe_hash"] == expected_hash
+    listed = list_run_artifact_files(run_id, run_root=run_root)
+    assert "universe_snapshot.json" in listed

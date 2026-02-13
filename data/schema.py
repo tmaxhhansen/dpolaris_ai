@@ -108,8 +108,17 @@ def canonicalize_price_frame(
     out["dividend"] = df[div_col] if div_col else 0.0
 
     split_col = _find_column(df, "split_factor")
-    split_raw = df[split_col] if split_col else 0.0
-    out["split_factor"] = np.where(pd.to_numeric(split_raw, errors="coerce").fillna(0.0) == 0.0, 1.0, split_raw)
+    if split_col:
+        split_raw = df[split_col]
+    else:
+        # Keep split_factor as a vector aligned to rows; scalar fallbacks can break .fillna chains downstream.
+        split_raw = pd.Series(1.0, index=df.index, dtype="float64")
+
+    split_numeric = pd.to_numeric(split_raw, errors="coerce")
+    if not isinstance(split_numeric, pd.Series):
+        split_numeric = pd.Series(split_numeric, index=df.index, dtype="float64")
+    split_numeric = split_numeric.reindex(df.index).fillna(0.0)
+    out["split_factor"] = np.where(split_numeric == 0.0, 1.0, split_numeric)
 
     for col in ["open", "high", "low", "close", "adj_close", "dividend", "split_factor", "volume"]:
         out[col] = pd.to_numeric(out[col], errors="coerce")

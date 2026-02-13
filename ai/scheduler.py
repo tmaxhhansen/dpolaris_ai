@@ -6,6 +6,7 @@ Runs automated tasks:
 - News scanning (every 15 minutes)
 - Prediction generation (hourly)
 - Cloud sync (every 5 minutes)
+- Universe build (daily)
 """
 
 import asyncio
@@ -50,6 +51,7 @@ class DPolarisScheduler:
         self.last_news_scan: Optional[datetime] = None
         self.last_prediction: Optional[datetime] = None
         self.last_sync: Optional[datetime] = None
+        self.last_universe_build: Optional[datetime] = None
 
     def start(self):
         """Start the scheduler"""
@@ -83,6 +85,16 @@ class DPolarisScheduler:
                 replace_existing=True,
             )
             logger.info("Scheduled: Deep learning training at 2:00 AM daily")
+
+        # Universe Build - Every day at 1:30 AM
+        self.scheduler.add_job(
+            self._run_universe_build,
+            CronTrigger(hour=1, minute=30),
+            id="universe_build",
+            name="Universe Build",
+            replace_existing=True,
+        )
+        logger.info("Scheduled: Universe build at 1:30 AM daily")
 
         # News Scanning - Every 15 minutes during market hours
         if self.enable_news:
@@ -124,6 +136,24 @@ class DPolarisScheduler:
             name="Health Check",
             replace_existing=True,
         )
+
+    async def _run_universe_build(self):
+        """Build daily Nasdaq/WSB universes."""
+        logger.info("Building daily universes...")
+
+        try:
+            from universe.builder import build_daily_universe_files
+
+            result = await asyncio.to_thread(build_daily_universe_files)
+            self.last_universe_build = datetime.now()
+            logger.info(
+                "Universe build completed: nasdaq=%s wsb=%s combined=%s",
+                ((result.get("nasdaq_top_500") or {}).get("count")),
+                ((result.get("wsb_top_500") or {}).get("count")),
+                ((result.get("combined_1000") or {}).get("count")),
+            )
+        except Exception as e:
+            logger.error(f"Universe build failed: {e}")
 
     async def _run_training(self):
         """Run deep learning training"""
@@ -297,6 +327,7 @@ class DPolarisScheduler:
             "last_news_scan": self.last_news_scan.isoformat() if self.last_news_scan else None,
             "last_prediction": self.last_prediction.isoformat() if self.last_prediction else None,
             "last_sync": self.last_sync.isoformat() if self.last_sync else None,
+            "last_universe_build": self.last_universe_build.isoformat() if self.last_universe_build else None,
         }
         logger.debug(f"Health check: {status}")
 
@@ -393,6 +424,7 @@ class DPolarisScheduler:
             "last_news_scan": self.last_news_scan.isoformat() if self.last_news_scan else None,
             "last_prediction": self.last_prediction.isoformat() if self.last_prediction else None,
             "last_sync": self.last_sync.isoformat() if self.last_sync else None,
+            "last_universe_build": self.last_universe_build.isoformat() if self.last_universe_build else None,
         }
 
     async def run_now(self, job_id: str):
@@ -402,6 +434,7 @@ class DPolarisScheduler:
             "news": self._run_news_scan,
             "predictions": self._run_predictions,
             "sync": self._run_sync,
+            "universe": self._run_universe_build,
         }
 
         if job_id in job_map:

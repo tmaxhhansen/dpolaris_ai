@@ -1,0 +1,23 @@
+{
+  "training_artifact_version": "1.0.0",
+  "run_id": "20260210T161126Z_logistic_c507dc6e",
+  "generated_at": "2026-02-10T16:11:27.150615+00:00",
+  "files": [
+    "artifact.json",
+    "artifacts/metadata.json",
+    "artifacts/model.pkl",
+    "artifacts/scaler.pkl",
+    "backtest_summary.json",
+    "config_snapshot.json",
+    "data_hashes.json",
+    "data_summary.json",
+    "dependency_snapshot.json",
+    "diagnostics_summary.json",
+    "feature_summary.json",
+    "metrics_summary.json",
+    "model_summary.json",
+    "reproducibility_summary.json",
+    "run_summary.json",
+    "split_summary.json"
+  ]
+}

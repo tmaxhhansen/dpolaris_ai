@@ -1,0 +1,80 @@
+{
+  "hash_algorithm": "sha256",
+  "generated_at": "2026-02-10T16:11:29.622385+00:00",
+  "dataset_hash_id": "6ef0906719a7de0c",
+  "hashes": [
+    {
+      "id": "run_summary",
+      "kind": "section",
+      "sha256": "04e36f87b89fa5acc1673d6701c43bde4aad28418d37a9b7f42b4b8ac5f4b29e",
+      "resolvable": true
+    },
+    {
+      "id": "data_summary",
+      "kind": "section",
+      "sha256": "6ef0906719a7de0c91d4051acea11c6ead0a24242de4fd25b17fb39bbf738d60",
+      "resolvable": true
+    },
+    {
+      "id": "feature_summary",
+      "kind": "section",
+      "sha256": "e8c7375d13bbebe39ef527c89214c1ee389325317cb0d66ef14bf10d88e7d865",
+      "resolvable": true
+    },
+    {
+      "id": "split_summary",
+      "kind": "section",
+      "sha256": "95aa35627f3170480135c67afb9fdca4b5f4b22b8f1370d0f0b3f7ca6a9cd5c3",
+      "resolvable": true
+    },
+    {
+      "id": "model_summary",
+      "kind": "section",
+      "sha256": "9b6547fa0dc6c3ebf6e8e272f2a30b32ec7a9d689e05eb12d51004c5f8e1e2ee",
+      "resolvable": true
+    },
+    {
+      "id": "metrics_summary",
+      "kind": "section",
+      "sha256": "be4ad4de8af31d8e1d339468b53118ec37221a0e8c492a7fed89b2b6fbd7c067",
+      "resolvable": true
+    },
+    {
+      "id": "backtest_summary",
+      "kind": "section",
+      "sha256": "488cf2d130e1c9d8d2eed630ceb37f4583fc3f1150187a70a1101877a7a8ee52",
+      "resolvable": true
+    },
+    {
+      "id": "diagnostics_summary",
+      "kind": "section",
+      "sha256": "b255b2cd15352eaf9d14a4585106cdd7890e3ec8c8f96face575b03a6677162d",
+      "resolvable": true
+    },
+    {
+      "id": "artifact:model.pkl",
+      "kind": "artifact_file",
+      "path": "artifacts/model.pkl",
+      "source": "/private/var/folders/pf/vq6fw1k53c39fv2szzftjmcr0000gn/T/pytest-of-darrenwon/pytest-18/test_training_uses_walk_forwar0/models/WF_TEST/20260210_081129/model.pkl",
+      "sha256": "7909bd5fca2a2389e1865c2330ca0128703f364ebfd7326e256dd440a8fca504",
+      "resolvable": true
+    },
+    {
+      "id": "artifact:metadata.json",
+      "kind": "artifact_file",
+      "path": "artifacts/metadata.json",
+      "source": "/private/var/folders/pf/vq6fw1k53c39fv2szzftjmcr0000gn/T/pytest-of-darrenwon/pytest-18/test_training_uses_walk_forwar0/models/WF_TEST/20260210_081129/metadata.json",
+      "sha256": "06c3626966174e8a87c591b38301740f7b01098981bf000696f8f0b793d09df1",
+      "resolvable": true
+    },
+    {
+      "id": "artifact:scaler.pkl",
+      "kind": "artifact_file",
+      "path": "artifacts/scaler.pkl",
+      "source": "/private/var/folders/pf/vq6fw1k53c39fv2szzftjmcr0000gn/T/pytest-of-darrenwon/pytest-18/test_training_uses_walk_forwar0/models/WF_TEST/20260210_081129/scaler.pkl",
+      "sha256": "47d1b57d393e1551718bd105daae1790fb1fe61cbaa5b204509c556ff9b8e56e",
+      "resolvable": true
+    }
+  ],
+  "all_resolvable": true
+}

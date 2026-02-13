@@ -19,6 +19,7 @@ runs/<runId>/
   metrics_summary.json
   backtest_summary.json
   diagnostics_summary.json
+  universe_snapshot.json
   artifacts/
     ...copied reproducibility files (model, metadata, logs, reports)...
 ```
@@ -38,6 +39,7 @@ runs/<runId>/
 - git metadata: `git_commit_hash`, `git_branch`
 - runtime metadata: `environment`, `hostname`, `user`
 - training identity: `model_type`, `target`, `horizon`, `tickers`, `timeframes`
+- universe binding: `universe_hash`
 
 `DataSummary`:
 - `sources_used`, `start`, `end`, `bars_count`
@@ -45,6 +47,7 @@ runs/<runId>/
 - `corporate_actions_applied`, `adjustments`
 - `outliers_detected`
 - `drop_or_repair_decisions`
+- `data_hashes` and run-level `universe_snapshot.json` for reproducibility
 
 `FeatureSummary`:
 - `feature_registry_version`

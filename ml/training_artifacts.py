@@ -33,6 +33,7 @@ CONFIG_SNAPSHOT_FILE = "config_snapshot.json"
 DEPENDENCY_SNAPSHOT_FILE = "dependency_snapshot.json"
 DATA_HASHES_FILE = "data_hashes.json"
 REPRO_SUMMARY_FILE = "reproducibility_summary.json"
+UNIVERSE_SNAPSHOT_FILE = "universe_snapshot.json"
 
 
 def _utc_now() -> datetime:
@@ -86,6 +87,71 @@ def _default_runs_root() -> Path:
     return path
 
 
+def _default_universe_path() -> Path:
+    value = os.getenv("DPOLARIS_ACTIVE_UNIVERSE", "universe/combined_1000.json")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _repo_root() / path
+    return path
+
+
+def _fallback_universe_payload(run_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0.0",
+        "generated_at": _utc_now().isoformat(),
+        "criteria": {
+            "source": "run_tickers_fallback",
+            "reason": "active_universe_file_missing_or_invalid",
+        },
+        "data_sources": [{"name": "run_summary_tickers"}],
+        "merged": [{"symbol": s, "sources": ["run_request"]} for s in (run_summary.get("tickers") or [])],
+        "notes": ["Universe snapshot fallback generated from run_summary.tickers"],
+    }
+
+
+def _load_universe_payload(path: Path) -> Optional[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        return None
+    return None
+
+
+def _write_universe_snapshot(
+    *,
+    run_dir: Path,
+    run_summary: dict[str, Any],
+    explicit_snapshot: Optional[dict[str, Any]] = None,
+    source_path: Optional[str | Path] = None,
+) -> tuple[dict[str, Any], str]:
+    payload: Optional[dict[str, Any]] = None
+
+    if isinstance(explicit_snapshot, dict):
+        payload = dict(explicit_snapshot)
+
+    if payload is None:
+        universe_path = Path(source_path).expanduser() if source_path is not None else _default_universe_path()
+        if not universe_path.is_absolute():
+            universe_path = _repo_root() / universe_path
+        payload = _load_universe_payload(universe_path)
+
+    if payload is None:
+        payload = _fallback_universe_payload(run_summary)
+
+    body = dict(payload)
+    body.pop("universe_hash", None)
+    universe_hash = _json_sha256(body)
+    body["universe_hash"] = universe_hash
+
+    _write_json(run_dir / UNIVERSE_SNAPSHOT_FILE, body)
+    return body, universe_hash
+
+
 def _normalize_summary(
     payload: Optional[dict[str, Any]],
     defaults: dict[str, Any],
@@ -109,6 +175,7 @@ def _build_run_summary(
     tickers: Sequence[str],
     timeframes: Sequence[str],
     environment: Optional[dict[str, Any]] = None,
+    universe_hash: Optional[str] = None,
 ) -> dict[str, Any]:
     created_at = _utc_now().isoformat()
     started_iso = _to_iso(started_at) or created_at
@@ -142,6 +209,7 @@ def _build_run_summary(
         "horizon": int(horizon),
         "tickers": [str(x).upper() for x in tickers],
         "timeframes": [str(x) for x in timeframes],
+        "universe_hash": universe_hash,
     }
 
 
@@ -303,6 +371,7 @@ def _build_config_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
             "assumptions": backtest_summary.get("assumptions", {}),
         },
         "primary_score": _resolve_primary_score(metrics_summary),
+        "universe_hash": run_summary.get("universe_hash"),
     }
 
 
@@ -343,6 +412,7 @@ def _build_data_hashes(
     payload: dict[str, Any],
     run_dir: Path,
     copied_files: Sequence[dict[str, Any]],
+    universe_snapshot_path: Optional[Path] = None,
 ) -> dict[str, Any]:
     hashes: list[dict[str, Any]] = []
 
@@ -395,6 +465,18 @@ def _build_data_hashes(
                 "sha256": None,
                 "resolvable": False,
                 "reason": copied.get("reason") or "copy_failed",
+            }
+        )
+
+    if universe_snapshot_path is not None:
+        universe_sha = _file_sha256(universe_snapshot_path)
+        hashes.append(
+            {
+                "id": "universe_snapshot",
+                "kind": "snapshot_file",
+                "path": UNIVERSE_SNAPSHOT_FILE,
+                "sha256": universe_sha,
+                "resolvable": bool(universe_sha),
             }
         )
 
@@ -481,6 +563,7 @@ def normalize_training_artifact(raw: dict[str, Any]) -> dict[str, Any]:
         "tickers": payload.get("tickers") or [],
         "timeframes": payload.get("timeframes") or [],
         "reproducibility_score": None,
+        "universe_hash": None,
     }
     data_defaults = {
         "sources_used": [],
@@ -601,6 +684,8 @@ def write_training_artifact(
     environment: Optional[dict[str, Any]] = None,
     artifact_files: Optional[Sequence[str | Path]] = None,
     run_root: Optional[str | Path] = None,
+    universe_snapshot: Optional[dict[str, Any]] = None,
+    universe_source_path: Optional[str | Path] = None,
 ) -> dict[str, Any]:
     root = Path(run_root).expanduser() if run_root is not None else _default_runs_root()
     rid = run_id or _new_run_id(model_type.replace(" ", "_").lower())
@@ -620,6 +705,7 @@ def write_training_artifact(
                 tickers=tickers,
                 timeframes=timeframes,
                 environment=environment,
+                universe_hash=None,
             ),
             "data_summary": data_summary or {},
             "feature_summary": feature_summary or {},
@@ -633,12 +719,25 @@ def write_training_artifact(
         }
     )
 
+    universe_payload, universe_hash = _write_universe_snapshot(
+        run_dir=run_dir,
+        run_summary=payload["run_summary"],
+        explicit_snapshot=universe_snapshot,
+        source_path=universe_source_path,
+    )
+    payload["run_summary"]["universe_hash"] = universe_hash
+
     copied = _copy_artifact_files(run_dir, artifact_files)
     payload["artifacts"]["files"] = copied
 
     config_snapshot = _build_config_snapshot(payload)
     dependency_snapshot = _build_dependency_snapshot(payload["run_summary"])
-    data_hashes = _build_data_hashes(payload, run_dir, copied)
+    data_hashes = _build_data_hashes(
+        payload,
+        run_dir,
+        copied,
+        universe_snapshot_path=(run_dir / UNIVERSE_SNAPSHOT_FILE),
+    )
     reproducibility_summary = _build_reproducibility_summary(
         config_snapshot=config_snapshot,
         dependency_snapshot=dependency_snapshot,
@@ -667,6 +766,7 @@ def write_training_artifact(
     _write_json(run_dir / DEPENDENCY_SNAPSHOT_FILE, dependency_snapshot)
     _write_json(run_dir / DATA_HASHES_FILE, data_hashes)
     _write_json(run_dir / REPRO_SUMMARY_FILE, reproducibility_summary)
+    _write_json(run_dir / UNIVERSE_SNAPSHOT_FILE, universe_payload)
     _write_json(
         run_dir / "manifest.json",
         {
@@ -738,6 +838,7 @@ def list_training_runs(*, run_root: Optional[str | Path] = None, limit: int = 50
                     "data_end": data_summary.get("end"),
                     "primary_score": _resolve_primary_score(metrics),
                     "reproducibility_score": reproducibility.get("score"),
+                    "universe_hash": summary.get("universe_hash"),
                     "path": str(run_dir),
                 }
             )

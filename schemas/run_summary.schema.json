@@ -22,27 +22,90 @@
     "timeframes"
   ],
   "properties": {
-    "run_id": { "type": "string" },
-    "status": { "type": "string" },
-    "created_at": { "type": ["string", "null"] },
-    "started_at": { "type": ["string", "null"] },
-    "completed_at": { "type": ["string", "null"] },
-    "duration_seconds": { "type": ["number", "null"] },
-    "git_commit_hash": { "type": ["string", "null"] },
-    "git_branch": { "type": ["string", "null"] },
-    "environment": { "type": "object", "additionalProperties": true },
-    "hostname": { "type": ["string", "null"] },
-    "user": { "type": ["string", "null"] },
-    "model_type": { "type": "string" },
-    "target": { "type": "string" },
-    "horizon": { "type": "integer" },
+    "run_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "duration_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "git_commit_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "git_branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "hostname": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "user": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model_type": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "horizon": {
+      "type": "integer"
+    },
     "tickers": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "timeframes": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
+    },
+    "universe_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "additionalProperties": true

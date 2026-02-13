@@ -1,0 +1,80 @@
+{
+  "hash_algorithm": "sha256",
+  "generated_at": "2026-02-10T16:11:26.683519+00:00",
+  "dataset_hash_id": "6ef0906719a7de0c",
+  "hashes": [
+    {
+      "id": "run_summary",
+      "kind": "section",
+      "sha256": "8ff86880101108242b5d38f845a202a234125ccd24ae6a013a0f9a0366f02761",
+      "resolvable": true
+    },
+    {
+      "id": "data_summary",
+      "kind": "section",
+      "sha256": "6ef0906719a7de0c91d4051acea11c6ead0a24242de4fd25b17fb39bbf738d60",
+      "resolvable": true
+    },
+    {
+      "id": "feature_summary",
+      "kind": "section",
+      "sha256": "e8c7375d13bbebe39ef527c89214c1ee389325317cb0d66ef14bf10d88e7d865",
+      "resolvable": true
+    },
+    {
+      "id": "split_summary",
+      "kind": "section",
+      "sha256": "95aa35627f3170480135c67afb9fdca4b5f4b22b8f1370d0f0b3f7ca6a9cd5c3",
+      "resolvable": true
+    },
+    {
+      "id": "model_summary",
+      "kind": "section",
+      "sha256": "9b6547fa0dc6c3ebf6e8e272f2a30b32ec7a9d689e05eb12d51004c5f8e1e2ee",
+      "resolvable": true
+    },
+    {
+      "id": "metrics_summary",
+      "kind": "section",
+      "sha256": "be4ad4de8af31d8e1d339468b53118ec37221a0e8c492a7fed89b2b6fbd7c067",
+      "resolvable": true
+    },
+    {
+      "id": "backtest_summary",
+      "kind": "section",
+      "sha256": "488cf2d130e1c9d8d2eed630ceb37f4583fc3f1150187a70a1101877a7a8ee52",
+      "resolvable": true
+    },
+    {
+      "id": "diagnostics_summary",
+      "kind": "section",
+      "sha256": "b255b2cd15352eaf9d14a4585106cdd7890e3ec8c8f96face575b03a6677162d",
+      "resolvable": true
+    },
+    {
+      "id": "artifact:model.pkl",
+      "kind": "artifact_file",
+      "path": "artifacts/model.pkl",
+      "source": "/private/var/folders/pf/vq6fw1k53c39fv2szzftjmcr0000gn/T/pytest-of-darrenwon/pytest-18/test_predictor_returns_calibra0/models/CAL_TEST/20260210_081126/model.pkl",
+      "sha256": "7909bd5fca2a2389e1865c2330ca0128703f364ebfd7326e256dd440a8fca504",
+      "resolvable": true
+    },
+    {
+      "id": "artifact:metadata.json",
+      "kind": "artifact_file",
+      "path": "artifacts/metadata.json",
+      "source": "/private/var/folders/pf/vq6fw1k53c39fv2szzftjmcr0000gn/T/pytest-of-darrenwon/pytest-18/test_predictor_returns_calibra0/models/CAL_TEST/20260210_081126/metadata.json",
+      "sha256": "21b81645bcc89fd06c26655ef687cf85c5859fcc35304f69bec9b3d6e25df804",
+      "resolvable": true
+    },
+    {
+      "id": "artifact:scaler.pkl",
+      "kind": "artifact_file",
+      "path": "artifacts/scaler.pkl",
+      "source": "/private/var/folders/pf/vq6fw1k53c39fv2szzftjmcr0000gn/T/pytest-of-darrenwon/pytest-18/test_predictor_returns_calibra0/models/CAL_TEST/20260210_081126/scaler.pkl",
+      "sha256": "47d1b57d393e1551718bd105daae1790fb1fe61cbaa5b204509c556ff9b8e56e",
+      "resolvable": true
+    }
+  ],
+  "all_resolvable": true
+}

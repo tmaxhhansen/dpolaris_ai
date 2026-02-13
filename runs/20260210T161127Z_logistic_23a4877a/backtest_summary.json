@@ -1,0 +1,15 @@
+{
+  "assumptions": {
+    "transaction_cost_bps": 2.0,
+    "slippage_bps": 3.0,
+    "long_threshold": 0.55,
+    "short_threshold": 0.45,
+    "annualization_periods": 252
+  },
+  "equity_curve_stats": {
+    "sharpe": 0.0,
+    "max_drawdown": 0.0,
+    "total_return": 0.0
+  },
+  "trade_list_artifact": null
+}

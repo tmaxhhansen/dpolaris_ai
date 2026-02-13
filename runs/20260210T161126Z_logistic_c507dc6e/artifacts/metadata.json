@@ -1,0 +1,423 @@
+{
+  "model_name": "REPRO_TEST",
+  "model_type": "logistic",
+  "version": "20260210_081126",
+  "target": "target_direction",
+  "feature_names": [
+    "return_1d",
+    "return_5d",
+    "return_10d",
+    "return_20d",
+    "sma_5",
+    "sma_10",
+    "sma_20",
+    "sma_50",
+    "sma_200",
+    "price_sma5_ratio",
+    "price_sma20_ratio",
+    "price_sma50_ratio",
+    "price_sma200_ratio",
+    "sma5_sma20_ratio",
+    "sma20_sma50_ratio",
+    "sma50_sma200_ratio",
+    "ema_12",
+    "ema_26",
+    "momentum_5",
+    "momentum_10",
+    "momentum_20",
+    "roc_5",
+    "roc_10",
+    "roc_20",
+    "high_low_range",
+    "close_position",
+    "hvol_5",
+    "hvol_10",
+    "hvol_20",
+    "hvol_50",
+    "hvol_ratio_5_20",
+    "hvol_ratio_10_50",
+    "atr_14",
+    "atr_percent",
+    "bb_middle",
+    "bb_upper",
+    "bb_lower",
+    "bb_width",
+    "bb_position",
+    "kc_width",
+    "vol_sma_5",
+    "vol_sma_20",
+    "vol_sma_50",
+    "vol_ratio_5",
+    "vol_ratio_20",
+    "obv",
+    "obv_sma_20",
+    "obv_trend",
+    "vwap_20",
+    "price_vwap_ratio",
+    "ad_line",
+    "rsi_14",
+    "rsi_oversold",
+    "rsi_overbought",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "macd_cross_up",
+    "stoch_k",
+    "stoch_d",
+    "williams_r",
+    "cci",
+    "adx",
+    "plus_di",
+    "minus_di",
+    "trend_strength",
+    "trend_direction",
+    "day_of_week",
+    "day_of_month",
+    "month",
+    "quarter",
+    "week_of_year",
+    "is_month_end",
+    "is_month_start",
+    "days_into_year"
+  ],
+  "metrics": {
+    "accuracy": 0.5344827586206896,
+    "precision": 0.5353982300884956,
+    "recall": 0.4230769230769231,
+    "f1": 0.47265625,
+    "roc_auc": 0.5303268160411018,
+    "classification": {
+      "accuracy": 0.5344827586206896,
+      "precision": 0.5353982300884956,
+      "recall": 0.4230769230769231,
+      "f1": 0.47265625,
+      "roc_auc": 0.5303268160411018,
+      "brier_score": 0.24885566317020277,
+      "reliability_curve": [
+        {
+          "bin_low": 0.0,
+          "bin_high": 0.1,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.1,
+          "bin_high": 0.2,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.2,
+          "bin_high": 0.30000000000000004,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.30000000000000004,
+          "bin_high": 0.4,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.4,
+          "bin_high": 0.5,
+          "count": 354.0,
+          "mean_predicted": 0.46911190787255574,
+          "observed_frequency": 0.4661016949152542
+        },
+        {
+          "bin_low": 0.5,
+          "bin_high": 0.6000000000000001,
+          "count": 226.0,
+          "mean_predicted": 0.5307082093072659,
+          "observed_frequency": 0.5353982300884956
+        },
+        {
+          "bin_low": 0.6000000000000001,
+          "bin_high": 0.7000000000000001,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.7000000000000001,
+          "bin_high": 0.8,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.8,
+          "bin_high": 0.9,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        },
+        {
+          "bin_low": 0.9,
+          "bin_high": 1.0,
+          "count": 0.0,
+          "mean_predicted": 0.0,
+          "observed_frequency": 0.0
+        }
+      ],
+      "calibration_error": 0.0036647587645563017
+    },
+    "regression": {
+      "mae": 0.018502619812866588,
+      "rmse": 0.023540057947282846,
+      "mape": 1.712843330367841,
+      "directional_accuracy": 0.5344827586206896,
+      "correlation": -0.02584373388766866,
+      "hit_rate_thresholds": {
+        "0.0000": 0.5344827586206896,
+        "0.0025": 0.0,
+        "0.0050": 0.0,
+        "0.0100": 0.0
+      }
+    },
+    "trading": {
+      "cagr": 0.0,
+      "sharpe": 0.0,
+      "sortino": 0.0,
+      "max_drawdown": 0.0,
+      "profit_factor": 0.0,
+      "win_rate": 0.0,
+      "average_win": 0.0,
+      "average_loss": 0.0,
+      "exposure": 0.0,
+      "turnover": 0.0,
+      "gross_pnl": 0.0,
+      "net_pnl": 0.0,
+      "cost_total": 0.0,
+      "trades": 0.0,
+      "total_return": 0.0
+    },
+    "primary_score": -0.452734375,
+    "validation": {
+      "method": "walk_forward",
+      "fold_count": 5,
+      "oof_samples": 580,
+      "folds": [
+        {
+          "fold": 1,
+          "train_size": 116,
+          "test_size": 116,
+          "classification": {
+            "accuracy": 0.5344827586206896,
+            "precision": 0.7894736842105263,
+            "recall": 0.23076923076923078,
+            "f1": 0.35714285714285715,
+            "roc_auc": 0.5337858220211161,
+            "brier_score": 0.44717252844028293,
+            "calibration_error": 0.4347871464320684
+          }
+        },
+        {
+          "fold": 2,
+          "train_size": 232,
+          "test_size": 116,
+          "classification": {
+            "accuracy": 0.4482758620689655,
+            "precision": 0.8,
+            "recall": 0.05970149253731343,
+            "f1": 0.1111111111111111,
+            "roc_auc": 0.6873286628084071,
+            "brier_score": 0.5264210683947492,
+            "calibration_error": 0.5352084322028343
+          }
+        },
+        {
+          "fold": 3,
+          "train_size": 348,
+          "test_size": 116,
+          "classification": {
+            "accuracy": 0.45689655172413796,
+            "precision": 0.43564356435643564,
+            "recall": 0.88,
+            "f1": 0.5827814569536424,
+            "roc_auc": 0.48424242424242425,
+            "brier_score": 0.3926725606605104,
+            "calibration_error": 0.346060085624821
+          }
+        },
+        {
+          "fold": 4,
+          "train_size": 464,
+          "test_size": 116,
+          "classification": {
+            "accuracy": 0.5086206896551724,
+            "precision": 0.5192307692307693,
+            "recall": 0.8852459016393442,
+            "f1": 0.6545454545454545,
+            "roc_auc": 0.49985096870342777,
+            "brier_score": 0.3568860887471245,
+            "calibration_error": 0.3109007562074584
+          }
+        },
+        {
+          "fold": 5,
+          "train_size": 580,
+          "test_size": 116,
+          "classification": {
+            "accuracy": 0.3793103448275862,
+            "precision": 0.3739130434782609,
+            "recall": 1.0,
+            "f1": 0.5443037974683544,
+            "roc_auc": 0.5046193055113093,
+            "brier_score": 0.4847316289317097,
+            "calibration_error": 0.4992975629464036
+          }
+        }
+      ]
+    },
+    "feature_importance": [
+      [
+        "obv_sma_20",
+        1.3515267353234826
+      ],
+      [
+        "price_vwap_ratio",
+        1.115316502071904
+      ],
+      [
+        "momentum_20",
+        0.8809228541717108
+      ],
+      [
+        "obv",
+        0.8364070154403213
+      ],
+      [
+        "momentum_10",
+        0.753716114389079
+      ],
+      [
+        "atr_14",
+        0.6999889229969172
+      ],
+      [
+        "hvol_5",
+        0.635217808824083
+      ],
+      [
+        "vwap_20",
+        0.6132754041468206
+      ],
+      [
+        "quarter",
+        0.5646139134497117
+      ],
+      [
+        "roc_10",
+        0.5554928535818313
+      ],
+      [
+        "return_10d",
+        0.555492853581809
+      ],
+      [
+        "bb_width",
+        0.5449216234518449
+      ],
+      [
+        "minus_di",
+        0.5022854509125072
+      ],
+      [
+        "kc_width",
+        0.43622019462555994
+      ],
+      [
+        "atr_percent",
+        0.43622019462555994
+      ],
+      [
+        "hvol_ratio_5_20",
+        0.40299551232026426
+      ],
+      [
+        "vol_ratio_20",
+        0.3967414533598821
+      ],
+      [
+        "bb_position",
+        0.3709468778679586
+      ],
+      [
+        "sma_10",
+        0.36338316673618076
+      ],
+      [
+        "sma20_sma50_ratio",
+        0.32637789603896605
+      ]
+    ],
+    "backtest_assumptions": {
+      "transaction_cost_bps": 2.0,
+      "slippage_bps": 3.0,
+      "long_threshold": 0.55,
+      "short_threshold": 0.45,
+      "annualization_periods": 252
+    }
+  },
+  "probability_calibration": {
+    "method": "platt",
+    "coef": -0.3144420929250827,
+    "intercept": 0.13671835598727278,
+    "samples": 580
+  },
+  "precision_config": {
+    "random_seed": 42,
+    "target": {
+      "classification": "target_direction",
+      "regression": "target_return",
+      "horizon_days": 5
+    },
+    "validation": {
+      "method": "walk_forward",
+      "walk_forward_splits": 5,
+      "min_samples": 500,
+      "enforce_no_lookahead": true,
+      "no_lookahead_sample_count": 12
+    },
+    "metrics": {
+      "reliability_bins": 10,
+      "regression_hit_rate_thresholds": [
+        0.0,
+        0.0025,
+        0.005,
+        0.01
+      ]
+    },
+    "backtest": {
+      "transaction_cost_bps": 2.0,
+      "slippage_bps": 3.0,
+      "long_threshold": 0.55,
+      "short_threshold": 0.45,
+      "annualization_periods": 252
+    },
+    "calibration": {
+      "enabled": true,
+      "method": "platt"
+    },
+    "primary_score": {
+      "objective": "maximize_sharpe_with_drawdown_cap",
+      "metric": "sharpe",
+      "fallback_metric": "f1",
+      "max_drawdown": 0.2,
+      "min_trades": 25
+    }
+  },
+  "data_window": {
+    "rows": 696,
+    "start": "2015-10-07T00:00:00+00:00",
+    "end": "2018-06-06T00:00:00+00:00",
+    "target_horizon_days": 5
+  },
+  "created_at": "2026-02-10T08:11:26.991859"
+}

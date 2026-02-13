@@ -1,0 +1,118 @@
+{
+  "classification": {
+    "accuracy": 0.5344827586206896,
+    "precision": 0.5353982300884956,
+    "recall": 0.4230769230769231,
+    "f1": 0.47265625,
+    "roc_auc": 0.5303268160411018,
+    "brier_score": 0.24885566317020277,
+    "reliability_curve": [
+      {
+        "bin_low": 0.0,
+        "bin_high": 0.1,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.1,
+        "bin_high": 0.2,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.2,
+        "bin_high": 0.30000000000000004,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.30000000000000004,
+        "bin_high": 0.4,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.4,
+        "bin_high": 0.5,
+        "count": 354.0,
+        "mean_predicted": 0.46911190787255574,
+        "observed_frequency": 0.4661016949152542
+      },
+      {
+        "bin_low": 0.5,
+        "bin_high": 0.6000000000000001,
+        "count": 226.0,
+        "mean_predicted": 0.5307082093072659,
+        "observed_frequency": 0.5353982300884956
+      },
+      {
+        "bin_low": 0.6000000000000001,
+        "bin_high": 0.7000000000000001,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.7000000000000001,
+        "bin_high": 0.8,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.8,
+        "bin_high": 0.9,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      },
+      {
+        "bin_low": 0.9,
+        "bin_high": 1.0,
+        "count": 0.0,
+        "mean_predicted": 0.0,
+        "observed_frequency": 0.0
+      }
+    ],
+    "calibration_error": 0.0036647587645563017
+  },
+  "regression": {
+    "mae": 0.018502619812866588,
+    "rmse": 0.023540057947282846,
+    "mape": 1.712843330367841,
+    "directional_accuracy": 0.5344827586206896,
+    "correlation": -0.02584373388766866,
+    "hit_rate_thresholds": {
+      "0.0000": 0.5344827586206896,
+      "0.0025": 0.0,
+      "0.0050": 0.0,
+      "0.0100": 0.0
+    }
+  },
+  "trading": {
+    "cagr": 0.0,
+    "sharpe": 0.0,
+    "sortino": 0.0,
+    "max_drawdown": 0.0,
+    "profit_factor": 0.0,
+    "win_rate": 0.0,
+    "average_win": 0.0,
+    "average_loss": 0.0,
+    "exposure": 0.0,
+    "turnover": 0.0,
+    "gross_pnl": 0.0,
+    "net_pnl": 0.0,
+    "cost_total": 0.0,
+    "trades": 0.0,
+    "total_return": 0.0
+  },
+  "calibration": {
+    "method": "platt",
+    "brier_score": 0.24885566317020277,
+    "calibration_error": 0.0036647587645563017
+  }
+}
