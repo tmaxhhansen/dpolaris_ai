@@ -9,6 +9,7 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -36,8 +37,8 @@ class PortInUseByUnknownProcessError(BackendProcessError):
 class BackendProcessConfig:
     host: str = "127.0.0.1"
     port: int = 8420
-    python_exe: Path = Path(r"C:\my-git\dpolaris_ai\.venv\Scripts\python.exe")
-    workdir: Path = Path(r"C:\my-git\dpolaris_ai")
+    python_exe: Path = Path(sys.executable).resolve()
+    workdir: Path = Path(__file__).resolve().parent.parent
     llm_provider: str = "none"
     health_timeout_seconds: float = 2.0
     start_timeout_seconds: float = 20.0
@@ -74,6 +75,14 @@ class BackendProcessManager:
             self._logs_dir.mkdir(parents=True, exist_ok=True)
 
     @property
+    def run_dir(self) -> Path:
+        return self._run_dir
+
+    @property
+    def pid_file(self) -> Path:
+        return self._pid_file
+
+    @property
     def health_url(self) -> str:
         return f"http://{self.config.host}:{self.config.port}/health"
 
@@ -85,14 +94,27 @@ class BackendProcessManager:
         with self._lock:
             now = dt.datetime.utcnow()
             restart_24h = sum(1 for x in self._restart_events if (now - x).total_seconds() <= 86400)
+            pid = self._process.pid if self._process is not None and self._process.poll() is None else None
+            managed_pid = self._read_pid_file()
+            port_owner_pid = self._find_pid_on_port(self.config.port)
+            port_owner_unknown = bool(
+                port_owner_pid
+                and port_owner_pid != pid
+                and port_owner_pid != managed_pid
+            )
             return {
                 "running": self.is_running(),
-                "pid": self._process.pid if self._process is not None and self._process.poll() is None else None,
+                "pid": pid,
                 "health_url": self.health_url,
                 "started_at": self._iso(self._started_at),
                 "last_restart": self._iso(self._last_restart_at),
                 "restart_count_24h": restart_24h,
                 "pid_file": str(self._pid_file),
+                "managed_pid": managed_pid,
+                "port_owner_pid": port_owner_pid,
+                "port_owner_unknown": port_owner_unknown,
+                "python_executable": str(self.config.python_exe),
+                "workdir": str(self.config.workdir),
             }
 
     def get_tail_lines(self, n: int = 20) -> list[str]:

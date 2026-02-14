@@ -5,10 +5,14 @@ Windows-friendly orchestrator daemon with backend self-healing.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+import os
+import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 from urllib import error as urlerror
 from urllib import parse as urlparse
@@ -63,9 +67,15 @@ class OrchestratorDaemon:
         notifier: Optional[SlackNotifier] = None,
     ):
         self.config = config or OrchestratorConfig()
+        repo_root = Path(__file__).resolve().parent.parent
         if process_manager is None:
             process_manager = BackendProcessManager(
-                BackendProcessConfig(host=self.config.host, port=self.config.port)
+                BackendProcessConfig(
+                    host=self.config.host,
+                    port=self.config.port,
+                    python_exe=Path(sys.executable).resolve(),
+                    workdir=repo_root,
+                )
             )
         self.process_manager = process_manager
         self.notifier = notifier or SlackNotifier(dry_run=self.config.dry_run)
@@ -81,6 +91,9 @@ class OrchestratorDaemon:
         self._next_scan_due = 0.0
         self._last_unhealthy_alert_at: Optional[dt.datetime] = None
         self._lock = threading.RLock()
+        self._run_dir = self.process_manager.run_dir
+        self._orchestrator_pid_file = self._run_dir / "orchestrator.pid"
+        self._heartbeat_file = self._run_dir / "orchestrator.heartbeat.json"
 
     def run_forever(self) -> None:
         self._running = True
@@ -88,21 +101,29 @@ class OrchestratorDaemon:
         self._next_health_due = now
         self._next_scan_due = now
         self._started_at = dt.datetime.utcnow()
+        self._write_orchestrator_pid()
+        self._write_heartbeat()
         logger.info("Orchestrator started for %s", self._base_url)
 
-        while self._running:
-            now = time.monotonic()
-            if now >= self._next_health_due:
-                self._run_health_cycle()
-            if now >= self._next_scan_due:
-                if self._is_market_hours():
-                    self._run_scan_cycle()
-                    self._last_scan_run = dt.datetime.utcnow()
-                self._next_scan_due = time.monotonic() + self.config.interval_scan_seconds
-            time.sleep(1)
+        try:
+            while self._running:
+                now = time.monotonic()
+                if now >= self._next_health_due:
+                    self._run_health_cycle()
+                if now >= self._next_scan_due:
+                    if self._is_market_hours():
+                        self._run_scan_cycle()
+                        self._last_scan_run = dt.datetime.utcnow()
+                    self._next_scan_due = time.monotonic() + self.config.interval_scan_seconds
+                self._write_heartbeat()
+                time.sleep(1)
+        finally:
+            self._write_heartbeat()
+            self._delete_orchestrator_pid()
 
     def stop(self) -> None:
         self._running = False
+        self._write_heartbeat()
 
     def status_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -126,6 +147,22 @@ class OrchestratorDaemon:
             return {"status": "ok", "healthy": healthy, "backend": self.process_manager.get_state()}
         except Exception as exc:
             return {"status": "error", "detail": str(exc), "backend": self.process_manager.get_state()}
+
+    def heartbeat_snapshot(self) -> dict[str, Any]:
+        return {
+            "started_at": self._iso(self._started_at),
+            "last_heartbeat": self._iso(dt.datetime.utcnow()),
+            "host": self.config.host,
+            "port": self.config.port,
+            "interval_health_seconds": self.config.interval_health_seconds,
+            "interval_scan_seconds": self.config.interval_scan_seconds,
+            "dry_run": self.config.dry_run,
+            "backend_pid": self.process_manager.get_state().get("pid"),
+            "backend_pid_file": str(self.process_manager.pid_file),
+            "orchestrator_pid_file": str(self._orchestrator_pid_file),
+            "python_executable": str(Path(sys.executable).resolve()),
+            "workdir": str(self.process_manager.config.workdir),
+        }
 
     def _run_health_cycle(self) -> None:
         self._last_health_check = dt.datetime.utcnow()
@@ -304,6 +341,23 @@ class OrchestratorDaemon:
             level="error",
         )
 
+    def _write_orchestrator_pid(self) -> None:
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        self._orchestrator_pid_file.write_text(str(os.getpid()), encoding="utf-8")
+
+    def _delete_orchestrator_pid(self) -> None:
+        try:
+            if self._orchestrator_pid_file.exists():
+                self._orchestrator_pid_file.unlink()
+        except Exception:
+            pass
+
+    def _write_heartbeat(self) -> None:
+        payload = self.heartbeat_snapshot()
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        with open(self._heartbeat_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
     def _request_json(
         self,
         method: str,
@@ -385,4 +439,3 @@ def get_orchestrator_singleton() -> OrchestratorDaemon:
         if _ORCHESTRATOR_SINGLETON is None:
             _ORCHESTRATOR_SINGLETON = OrchestratorDaemon()
         return _ORCHESTRATOR_SINGLETON
-

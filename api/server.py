@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, date, timezone, timedelta
@@ -23,6 +24,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import numpy as np
+try:
+    import psutil  # type: ignore
+except Exception:  # pragma: no cover
+    psutil = None
 
 from core.config import Config, get_config
 from core.database import Database
@@ -168,6 +173,157 @@ def _format_uptime(started_at: Optional[datetime]) -> Optional[str]:
     if minutes > 0:
         return f"{minutes}m {seconds}s"
     return f"{seconds}s"
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if psutil is not None:
+        try:
+            return psutil.pid_exists(pid)
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _pid_cmdline(pid: int) -> Optional[str]:
+    if pid <= 0:
+        return None
+    if psutil is None:
+        return None
+    try:
+        proc = psutil.Process(pid)
+        parts = proc.cmdline()
+        return " ".join(parts) if parts else None
+    except Exception:
+        return None
+
+
+def _find_pid_on_port(port: int) -> Optional[int]:
+    try:
+        if psutil is not None:
+            for conn in psutil.net_connections(kind="tcp"):
+                laddr = getattr(conn, "laddr", None)
+                status = str(getattr(conn, "status", "")).upper()
+                if not laddr or status != "LISTEN":
+                    continue
+                if int(getattr(laddr, "port", -1)) == int(port):
+                    pid = getattr(conn, "pid", None)
+                    if pid:
+                        return int(pid)
+    except Exception:
+        pass
+
+    try:
+        if os.name == "nt":
+            proc = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            needle = f":{int(port)}"
+            for line in proc.stdout.splitlines():
+                if needle not in line or "LISTENING" not in line.upper():
+                    continue
+                parts = line.split()
+                if parts:
+                    return int(parts[-1])
+    except Exception:
+        return None
+    return None
+
+
+def _orchestrator_runtime_status(
+    *,
+    data_dir: Path,
+    default_host: str = "127.0.0.1",
+    default_port: int = 8420,
+    heartbeat_stale_seconds: int = 180,
+) -> dict[str, Any]:
+    run_dir = data_dir / "run"
+    pid_path = run_dir / "orchestrator.pid"
+    hb_path = run_dir / "orchestrator.heartbeat.json"
+    backend_pid_path = run_dir / "backend.pid"
+
+    pid_exists = pid_path.exists()
+    pid = None
+    if pid_exists:
+        try:
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+        except Exception:
+            pid = None
+
+    hb_payload: dict[str, Any] = {}
+    heartbeat_exists = hb_path.exists()
+    if heartbeat_exists:
+        try:
+            with open(hb_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                hb_payload = loaded
+        except Exception:
+            hb_payload = {}
+
+    host = str(hb_payload.get("host") or default_host)
+    port = int(hb_payload.get("port") or default_port)
+
+    last_hb_raw = hb_payload.get("last_heartbeat")
+    last_hb_dt = _parse_timestamp(last_hb_raw) if isinstance(last_hb_raw, str) else None
+    heartbeat_age_seconds = None
+    heartbeat_recent = False
+    if last_hb_dt is not None:
+        heartbeat_age_seconds = max(0, int((datetime.utcnow() - last_hb_dt).total_seconds()))
+        heartbeat_recent = heartbeat_age_seconds <= int(heartbeat_stale_seconds)
+
+    pid_alive = _is_pid_alive(int(pid)) if pid else False
+    running = bool(pid_exists and pid and pid_alive and heartbeat_recent)
+
+    backend_pid = None
+    if backend_pid_path.exists():
+        try:
+            backend_pid = int(backend_pid_path.read_text(encoding="utf-8").strip())
+        except Exception:
+            backend_pid = None
+    backend_pid_alive = _is_pid_alive(int(backend_pid)) if backend_pid else False
+    port_owner_pid = _find_pid_on_port(port)
+    port_owner_unknown = bool(
+        port_owner_pid
+        and (not backend_pid or int(port_owner_pid) != int(backend_pid))
+    )
+
+    return {
+        "running": running,
+        "pid_exists": pid_exists,
+        "pid": pid,
+        "pid_alive": pid_alive,
+        "heartbeat_exists": heartbeat_exists,
+        "heartbeat_file": str(hb_path),
+        "heartbeat_age_seconds": heartbeat_age_seconds,
+        "heartbeat_recent": heartbeat_recent,
+        "heartbeat_stale_threshold_seconds": int(heartbeat_stale_seconds),
+        "started_at": hb_payload.get("started_at"),
+        "last_heartbeat": hb_payload.get("last_heartbeat"),
+        "host": host,
+        "port": port,
+        "pid_file": str(pid_path),
+        "orchestrator_cmdline": _pid_cmdline(int(pid)) if pid else None,
+        "port_owner_unknown": port_owner_unknown,
+        "backend_state": {
+            "pid": backend_pid,
+            "pid_file": str(backend_pid_path),
+            "running": bool(backend_pid and backend_pid_alive),
+            "pid_alive": backend_pid_alive,
+            "port_owner_pid": port_owner_pid,
+            "port_owner_unknown": port_owner_unknown,
+            "health_url": f"http://{host}:{port}/health",
+        },
+        "heartbeat_payload": hb_payload,
+    }
 
 
 def _public_training_job(job: dict) -> dict:
@@ -2668,10 +2824,14 @@ async def get_ai_status():
 async def get_orchestrator_status():
     """Get orchestrator and backend self-healing status."""
     try:
-        from daemon.orchestrator import get_orchestrator_singleton
-
-        orchestrator = get_orchestrator_singleton()
-        return orchestrator.status_snapshot()
+        cfg = config or get_config()
+        status = _orchestrator_runtime_status(
+            data_dir=cfg.data_dir,
+            default_host="127.0.0.1",
+            default_port=8420,
+            heartbeat_stale_seconds=180,
+        )
+        return status
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -2680,10 +2840,40 @@ async def get_orchestrator_status():
 async def orchestrator_restart_backend():
     """Restart backend using orchestrator process manager."""
     try:
-        from daemon.orchestrator import get_orchestrator_singleton
+        runtime = _orchestrator_runtime_status(
+            data_dir=(config or get_config()).data_dir,
+            default_host="127.0.0.1",
+            default_port=8420,
+            heartbeat_stale_seconds=180,
+        )
+        hb = runtime.get("heartbeat_payload") if isinstance(runtime, dict) else {}
+        if not isinstance(hb, dict):
+            hb = {}
 
-        orchestrator = get_orchestrator_singleton()
-        result = orchestrator.force_restart_backend(reason="api_request")
+        host = str(hb.get("host") or "127.0.0.1")
+        port = int(hb.get("port") or 8420)
+        python_exe = str(hb.get("python_executable") or sys.executable)
+        workdir = str(hb.get("workdir") or Path(__file__).resolve().parent.parent)
+
+        from daemon.backend_process import BackendProcessConfig, BackendProcessManager
+
+        manager = BackendProcessManager(
+            BackendProcessConfig(
+                host=host,
+                port=port,
+                python_exe=Path(python_exe).resolve(),
+                workdir=Path(workdir).resolve(),
+                data_dir=(config or get_config()).data_dir,
+            )
+        )
+        manager.restart_backend(reason="api_request")
+        healthy = manager.wait_until_healthy(timeout_seconds=20)
+        result = {
+            "status": "ok" if healthy else "error",
+            "healthy": healthy,
+            "backend": manager.get_state(),
+            "orchestrator_running": runtime.get("running", False),
+        }
         if result.get("status") != "ok":
             raise HTTPException(status_code=500, detail=result)
         return result

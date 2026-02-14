@@ -53,6 +53,7 @@ scripts/*.log
 scripts/*.ps1
 !scripts/smoke_test.py
 !scripts/orchestrator_smoke.py
+!scripts/verify_orchestrator_windows.ps1
 
 # Windows requirements lock snapshots are local unless intentionally tracked
 requirements-windows.lock.txt
