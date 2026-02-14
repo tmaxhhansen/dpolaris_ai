@@ -1019,7 +1019,10 @@ def _resolve_universe_definition_path(universe_name: str) -> tuple[str, Path]:
         return display_name, generated.resolve()
 
     searched = [str(path) for path in roots]
-    raise FileNotFoundError(f"Universe '{display_name}' not found. Searched: {searched}")
+    supported = sorted(list(SUPPORTED_UNIVERSE_EXTENSIONS))
+    raise FileNotFoundError(
+        f"Universe '{display_name}' not found. Searched: {searched}. Supported extensions: {supported}"
+    )
 
 
 def _normalize_universe_alias(universe_name: str) -> str:
@@ -3417,7 +3420,7 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 @app.get("/api/scan/universe/list")
 async def list_universe_definitions():
     """List available universe definitions."""
-    universes = _discover_universe_definitions()
+    universes = _list_universe_definitions()
     return {"universes": universes, "count": len(universes)}
 
 
@@ -3459,7 +3462,7 @@ async def get_scan_universe(universe_name: str):
 async def get_universe_definition(universe_name: str):
     normalized_input = (universe_name or "").strip().lower()
     if normalized_input == "list":
-        universes = _discover_universe_definitions()
+        universes = _list_universe_definitions()
         return {"universes": universes, "count": len(universes)}
 
     universe_name = _normalize_universe_alias(universe_name)
@@ -3469,12 +3472,16 @@ async def get_universe_definition(universe_name: str):
         payload = _load_universe_file_payload(path)
         tickers = _extract_universe_tickers(payload, path)
     except FileNotFoundError:
+        looked_in = [str(path) for path in _configured_universe_dirs()]
+        supported = sorted(list(SUPPORTED_UNIVERSE_EXTENSIONS))
         raise HTTPException(
             status_code=404,
             detail={
                 "error": "not_found",
                 "message": f"Universe '{universe_name}' was not found.",
                 "known_universes": known_names,
+                "looked_in": looked_in,
+                "supported_extensions": supported,
             },
         )
     except ValueError as exc:
