@@ -71,6 +71,12 @@ List universes:
 irm http://127.0.0.1:8420/api/universe/list
 ```
 
+Quick smoke:
+
+```powershell
+irm http://127.0.0.1:8420/api/universe/list
+```
+
 Fetch one universe:
 
 ```powershell

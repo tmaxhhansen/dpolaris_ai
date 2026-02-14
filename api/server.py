@@ -108,6 +108,7 @@ SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
 KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
 SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml"}
+LISTABLE_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
     "AMD", "INTC", "ADBE", "CSCO", "PEP", "QCOM", "TXN", "AMAT", "INTU", "BKNG",
@@ -815,18 +816,15 @@ def _normalize_universe_name(universe_name: str) -> str:
 
 
 def _list_universe_definitions() -> list[str]:
-    names = set(KNOWN_UNIVERSE_NAMES)
     universe_dir = _repo_root() / "universe"
     if not universe_dir.exists() or not universe_dir.is_dir():
-        return sorted(names)
+        return []
 
+    names: set[str] = set()
     for entry in universe_dir.iterdir():
         if entry.name.startswith(".") or entry.name == "__pycache__":
             continue
-        if entry.is_dir():
-            names.add(entry.name)
-            continue
-        if entry.is_file() and entry.suffix.lower() in SUPPORTED_UNIVERSE_EXTENSIONS:
+        if entry.is_file() and entry.suffix.lower() in LISTABLE_UNIVERSE_EXTENSIONS:
             names.add(entry.stem)
     return sorted(names)
 
@@ -3319,9 +3317,6 @@ async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
 @app.get("/universe/{universe_name}")
 @app.get("/api/universe/{universe_name}")
 async def get_scan_universe(universe_name: str):
-    # Defensive guard: if a router ordering issue captures "list" here, return list payload.
-    if str(universe_name).strip().lower() == "list":
-        return _list_universe_definitions()
     try:
         normalized_name, path = _resolve_universe_definition_path(universe_name)
         payload = _load_universe_file_payload(path)
