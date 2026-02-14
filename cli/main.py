@@ -12,11 +12,13 @@ Usage:
     dpolaris predict SYMBOL ML prediction
     dpolaris train SYMBOL   Train model
     dpolaris server         Start API server
+    dpolaris orchestrator   Start self-healing orchestrator daemon
     dpolaris backup         Create backup
     dpolaris setup          Initial setup
 """
 
 import asyncio
+import logging
 import os
 import sys
 import signal
@@ -307,46 +309,39 @@ def server(host: str, port: int):
 
 
 @cli.command()
-@click.option("--base-url", default="http://127.0.0.1:8420", help="Backend API base URL")
-@click.option("--dry-run", is_flag=True, help="Do not trigger live scan jobs or Slack posts")
-@click.option("--top-n", default=5, type=click.IntRange(1, 50), help="Top tickers to evaluate")
-@click.option("--threshold", default=0.65, type=click.FloatRange(0.0, 1.0), help="Signal score alert threshold")
-@click.option("--horizon-days", default=5, type=click.IntRange(1, 30), help="Signal horizon in days")
-@click.option("--health-interval-minutes", default=5, type=click.IntRange(1, 120), help="Health poll cadence")
-@click.option("--scan-interval-minutes", default=30, type=click.IntRange(1, 240), help="Scan cadence")
-@click.option("--poll-seconds", default=10, type=click.IntRange(2, 120), help="Scan status poll interval")
-@click.option("--scan-timeout-minutes", default=20, type=click.IntRange(1, 240), help="Scan run timeout")
-def orchestrator(
-    base_url: str,
-    dry_run: bool,
-    top_n: int,
-    threshold: float,
-    horizon_days: int,
-    health_interval_minutes: int,
-    scan_interval_minutes: int,
-    poll_seconds: int,
-    scan_timeout_minutes: int,
-):
-    """Run orchestrator daemon for health checks, scans, and Slack alerts."""
-    from daemon import OrchestratorSettings, run_orchestrator
+@click.option("--host", default="127.0.0.1", show_default=True, help="Backend host")
+@click.option("--port", default=8420, type=int, show_default=True, help="Backend port")
+@click.option("--interval-health", default=60, type=int, show_default=True, help="Health check interval (seconds)")
+@click.option("--interval-scan", default="30m", show_default=True, help="Scan interval (e.g. 30m, 1800, 1h)")
+@click.option("--dry-run", is_flag=True, help="Do not send external notifications")
+def orchestrator(host: str, port: int, interval_health: int, interval_scan: str, dry_run: bool):
+    """Run the self-healing backend orchestrator."""
+    from daemon.orchestrator import OrchestratorConfig, OrchestratorDaemon, parse_duration_seconds
 
-    settings = OrchestratorSettings(
-        base_url=base_url,
-        health_check_interval_seconds=health_interval_minutes * 60,
-        scan_interval_seconds=scan_interval_minutes * 60,
-        scan_poll_interval_seconds=poll_seconds,
-        scan_timeout_seconds=scan_timeout_minutes * 60,
-        horizon_days=horizon_days,
-        top_n=top_n,
-        signal_threshold=threshold,
-        dry_run=dry_run,
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+
+    scan_seconds = parse_duration_seconds(interval_scan)
+    cfg = OrchestratorConfig(
+        host=host,
+        port=port,
+        interval_health_seconds=max(5, int(interval_health)),
+        interval_scan_seconds=max(60, int(scan_seconds)),
+        dry_run=bool(dry_run),
+    )
+    daemon = OrchestratorDaemon(config=cfg)
 
     console.print(
-        "Starting orchestrator "
-        f"(base_url={base_url}, dry_run={dry_run}, threshold={threshold:.2f}, top_n={top_n})"
+        f"Starting orchestrator against http://{host}:{port} "
+        f"(health={cfg.interval_health_seconds}s, scan={cfg.interval_scan_seconds}s, dry_run={cfg.dry_run})"
     )
-    run_orchestrator(settings=settings)
+    try:
+        daemon.run_forever()
+    except KeyboardInterrupt:
+        daemon.stop()
+        console.print("[yellow]Orchestrator stopped[/yellow]")
 
 
 # ==================== Data Commands ====================

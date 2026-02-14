@@ -2664,6 +2664,35 @@ async def get_ai_status():
     }
 
 
+@app.get("/api/orchestrator/status")
+async def get_orchestrator_status():
+    """Get orchestrator and backend self-healing status."""
+    try:
+        from daemon.orchestrator import get_orchestrator_singleton
+
+        orchestrator = get_orchestrator_singleton()
+        return orchestrator.status_snapshot()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/orchestrator/restart-backend")
+async def orchestrator_restart_backend():
+    """Restart backend using orchestrator process manager."""
+    try:
+        from daemon.orchestrator import get_orchestrator_singleton
+
+        orchestrator = get_orchestrator_singleton()
+        result = orchestrator.force_restart_backend(reason="api_request")
+        if result.get("status") != "ok":
+            raise HTTPException(status_code=500, detail=result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/memories")
 async def get_memories(category: Optional[str] = None, limit: int = 50):
     """Get AI memories with optional category filter."""
