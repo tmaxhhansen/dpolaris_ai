@@ -1008,6 +1008,13 @@ def _resolve_universe_definition_path(universe_name: str) -> tuple[str, Path]:
     raise FileNotFoundError(f"Universe '{display_name}' not found in {universe_dir}")
 
 
+def _normalize_universe_alias(universe_name: str) -> str:
+    normalized = (universe_name or "").strip().lower()
+    if normalized in {"all", "default", "*"}:
+        return "combined_1000"
+    return universe_name
+
+
 def _short_run_id(run_id: str) -> str:
     return run_id[:8]
 
@@ -3398,7 +3405,7 @@ async def list_universe_definitions():
 @app.get("/scan/universe")
 @app.get("/api/scan/universe")
 async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
-    return await get_scan_universe(name)
+    return await get_scan_universe(_normalize_universe_alias(name))
 
 
 @app.get("/scan/universe/{universe_name}")
@@ -3406,6 +3413,11 @@ async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
 @app.get("/universe/{universe_name}")
 @app.get("/api/universe/{universe_name}")
 async def get_scan_universe(universe_name: str):
+    normalized_input = (universe_name or "").strip().lower()
+    if normalized_input == "list":
+        return _list_universe_definitions()
+
+    universe_name = _normalize_universe_alias(universe_name)
     try:
         normalized_name, path = _resolve_universe_definition_path(universe_name)
         payload = _load_universe_file_payload(path)
