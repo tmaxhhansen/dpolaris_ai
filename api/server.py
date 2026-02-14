@@ -446,9 +446,8 @@ def _require_llm_enabled() -> None:
 
 def _scheduler_dependency_detail() -> dict[str, str]:
     return {
-        "detail": "scheduler_disabled",
-        "reason": "apscheduler not installed",
-        "fix": "pip install apscheduler",
+        "error": "scheduler_unavailable",
+        "detail": "Install apscheduler: pip install apscheduler",
     }
 
 
@@ -967,7 +966,9 @@ def _build_all_universe_entry(universe_entries: list[dict[str, Any]]) -> dict[st
                 symbols.add(cleaned)
     return {
         "name": "all",
+        "count": len(symbols),
         "symbol_count": len(symbols),
+        "source": "generated",
         "path": "dynamic:all",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "generated": True,
@@ -1002,7 +1003,9 @@ def _list_universe_entries() -> list[dict[str, Any]]:
             count = 0
         entry = {
             "name": name,
+            "count": int(count),
             "symbol_count": int(count),
+            "source": "file",
             "path": str(path),
             "updated_at": _universe_file_modified_iso(path),
             "generated": name in generated_names,
