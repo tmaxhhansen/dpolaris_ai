@@ -109,6 +109,11 @@ DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
 KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
 SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
 LISTABLE_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
+DEFAULT_UNIVERSE_ALIASES = {
+    "nasdaq_top_500": "nasdaq_top_500",
+    "wsb_top_500": "wsb_top_500",
+    "merged": "combined_1000",
+}
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
     "AMD", "INTC", "ADBE", "CSCO", "PEP", "QCOM", "TXN", "AMAT", "INTU", "BKNG",
@@ -897,6 +902,12 @@ def _configured_universe_dirs() -> list[Path]:
             candidate = candidate.resolve()
         if all(candidate != existing for existing in roots):
             roots.append(candidate)
+
+    user_profile = os.getenv("USERPROFILE")
+    if user_profile:
+        profile_universe = (Path(user_profile).expanduser() / "dpolaris_data" / "universe").resolve()
+        if all(profile_universe != existing for existing in roots):
+            roots.append(profile_universe)
     return roots
 
 
@@ -956,17 +967,31 @@ def _build_all_universe_entry(universe_entries: list[dict[str, Any]]) -> dict[st
                 symbols.add(cleaned)
     return {
         "name": "all",
-        "count": len(symbols),
+        "symbol_count": len(symbols),
         "path": "dynamic:all",
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "generated": True,
     }
 
 
 def _list_universe_entries() -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    has_all = False
+    generated_names: set[str] = set()
+    for public_name, internal_name in DEFAULT_UNIVERSE_ALIASES.items():
+        existing = (_repo_root() / "universe" / f"{internal_name}.json")
+        if not existing.exists():
+            created = _ensure_default_universe_file(internal_name)
+            if created is not None:
+                generated_names.add(public_name)
+
+    entries_by_name: dict[str, dict[str, Any]] = {}
+    remap_to_public = {
+        "combined_1000": "merged",
+        "nasdaq_top_500": "nasdaq_top_500",
+        "wsb_top_500": "wsb_top_500",
+    }
     for item in _discover_universe_definitions():
-        name = str(item.get("name") or "").strip()
+        raw_name = str(item.get("name") or "").strip()
+        name = remap_to_public.get(raw_name, raw_name)
         path_str = str(item.get("path") or "").strip()
         if not name or not path_str:
             continue
@@ -977,15 +1002,19 @@ def _list_universe_entries() -> list[dict[str, Any]]:
             count = 0
         entry = {
             "name": name,
-            "count": int(count),
+            "symbol_count": int(count),
             "path": str(path),
             "updated_at": _universe_file_modified_iso(path),
+            "generated": name in generated_names,
         }
-        entries.append(entry)
-        if name.lower() == "all":
-            has_all = True
+        current = entries_by_name.get(name)
+        if current is None:
+            entries_by_name[name] = entry
+        elif str(entry.get("path", "")).startswith(str((_repo_root() / "universe").resolve())):
+            entries_by_name[name] = entry
 
-    if not has_all:
+    entries = list(entries_by_name.values())
+    if "all" not in entries_by_name:
         entries.append(_build_all_universe_entry(entries))
 
     entries.sort(key=lambda x: str(x.get("name") or "").lower())
@@ -1099,7 +1128,7 @@ def _resolve_universe_definition_path(universe_name: str) -> tuple[str, Path]:
 
 def _normalize_universe_alias(universe_name: str) -> str:
     normalized = (universe_name or "").strip().lower()
-    if normalized in {"all", "default", "*"}:
+    if normalized in {"all", "default", "*", "merged"}:
         return "combined_1000"
     return universe_name
 
@@ -3501,7 +3530,10 @@ async def list_universe_definitions():
 
 @app.get("/scan/universe")
 @app.get("/api/scan/universe")
-async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
+async def get_scan_universe_by_name(name: Optional[str] = Query(None, min_length=1)):
+    # Backward compatibility: when no name is provided return universe listing payload.
+    if not name:
+        return await list_universe_definitions()
     return await get_scan_universe(_normalize_universe_alias(name))
 
 
@@ -3530,6 +3562,13 @@ async def get_scan_universe(universe_name: str):
         response["schema_version"] = payload.get("schema_version")
         response["universe"] = payload
     return response
+
+
+@app.get("/api/universe/all")
+@app.get("/universe/all")
+async def get_universe_all():
+    """Convenience alias for merged universe that never returns 404."""
+    return await get_universe_definition("merged")
 
 
 @app.get("/universe/{universe_name}")

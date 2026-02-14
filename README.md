@@ -78,6 +78,11 @@ pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_deep_learning_job.ps1
 
 ## Universe API (Control Center)
 
+Universe files are discovered from:
+
+- `C:\my-git\dpolaris_ai\universe`
+- `%USERPROFILE%\dpolaris_data\universe` (if present)
+
 List universes:
 
 ```powershell
@@ -100,6 +105,8 @@ Quick smoke:
 irm http://127.0.0.1:8420/api/universe/list
 irm http://127.0.0.1:8420/api/scan/universe/list
 irm http://127.0.0.1:8420/api/universe/all
+irm http://127.0.0.1:8420/api/universe/merged
+C:\my-git\dpolaris_ai\.venv\Scripts\python.exe C:\my-git\dpolaris_ai\scripts\smoke_universe_endpoints.py
 pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_universe.ps1
 pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_universe_list.ps1
 ```
