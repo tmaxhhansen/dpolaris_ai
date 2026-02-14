@@ -58,6 +58,7 @@ scripts/*.ps1
 !scripts/install_torch_gpu.ps1
 !scripts/smoke_deep_learning_job.ps1
 !scripts/smoke_universe_list.ps1
+!scripts/smoke_universe.ps1
 !scripts/reset_8420.ps1
 !scripts/start_server_clean.ps1
 !scripts/bootstrap_windows.ps1

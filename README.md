@@ -84,11 +84,23 @@ List universes:
 irm http://127.0.0.1:8420/api/universe/list
 ```
 
+Expected list shape:
+
+```json
+{
+  "universes": [
+    {"name": "all", "count": 123, "path": "dynamic:all", "updated_at": "2026-01-01T00:00:00+00:00"}
+  ]
+}
+```
+
 Quick smoke:
 
 ```powershell
 irm http://127.0.0.1:8420/api/universe/list
 irm http://127.0.0.1:8420/api/scan/universe/list
+irm http://127.0.0.1:8420/api/universe/all
+pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_universe.ps1
 pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_universe_list.ps1
 ```
 

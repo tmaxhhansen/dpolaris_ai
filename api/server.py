@@ -21,7 +21,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 import numpy as np
 try:
@@ -441,9 +441,9 @@ def _require_llm_enabled() -> None:
 
 def _scheduler_dependency_detail() -> dict[str, str]:
     return {
-        "error": "missing_dependency",
-        "dependency": "apscheduler",
-        "install": "pip install apscheduler",
+        "detail": "scheduler_disabled",
+        "reason": "apscheduler not installed",
+        "fix": "pip install apscheduler",
     }
 
 
@@ -459,6 +459,10 @@ def _raise_if_scheduler_dependency_missing(exc: Exception) -> bool:
     if not _is_apscheduler_missing(exc):
         return False
     raise HTTPException(status_code=503, detail=_scheduler_dependency_detail())
+
+
+def _scheduler_dependency_response() -> JSONResponse:
+    return JSONResponse(status_code=503, content=_scheduler_dependency_detail())
 
 
 def _trim_training_jobs() -> None:
@@ -920,8 +924,76 @@ def _discover_universe_definitions() -> list[dict[str, str]]:
     return [discovered[name] for name in sorted(discovered.keys())]
 
 
+def _universe_file_modified_iso(path: Path) -> Optional[str]:
+    try:
+        ts = path.stat().st_mtime
+    except Exception:
+        return None
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _load_universe_symbols_from_path(path: Path) -> list[str]:
+    payload = _load_universe_file_payload(path)
+    return _extract_universe_tickers(payload, path)
+
+
+def _build_all_universe_entry(universe_entries: list[dict[str, Any]]) -> dict[str, Any]:
+    symbols: set[str] = set()
+    for item in universe_entries:
+        name = str(item.get("name") or "").strip().lower()
+        if not name or name == "all":
+            continue
+        path_str = str(item.get("path") or "").strip()
+        if not path_str:
+            continue
+        try:
+            tickers = _load_universe_symbols_from_path(Path(path_str))
+        except Exception:
+            continue
+        for ticker in tickers:
+            cleaned = _sanitize_symbol(ticker)
+            if cleaned:
+                symbols.add(cleaned)
+    return {
+        "name": "all",
+        "count": len(symbols),
+        "path": "dynamic:all",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _list_universe_entries() -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    has_all = False
+    for item in _discover_universe_definitions():
+        name = str(item.get("name") or "").strip()
+        path_str = str(item.get("path") or "").strip()
+        if not name or not path_str:
+            continue
+        path = Path(path_str)
+        try:
+            count = len(_load_universe_symbols_from_path(path))
+        except Exception:
+            count = 0
+        entry = {
+            "name": name,
+            "count": int(count),
+            "path": str(path),
+            "updated_at": _universe_file_modified_iso(path),
+        }
+        entries.append(entry)
+        if name.lower() == "all":
+            has_all = True
+
+    if not has_all:
+        entries.append(_build_all_universe_entry(entries))
+
+    entries.sort(key=lambda x: str(x.get("name") or "").lower())
+    return entries
+
+
 def _list_universe_definitions() -> list[str]:
-    return [item["name"] for item in _discover_universe_definitions()]
+    return [str(item.get("name") or "") for item in _list_universe_entries() if str(item.get("name") or "")]
 
 
 def _extract_tickers_from_container(values: list[Any], seen: set[str], output: list[str]) -> None:
@@ -3420,8 +3492,11 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 @app.get("/api/scan/universe/list")
 async def list_universe_definitions():
     """List available universe definitions."""
-    universes = _list_universe_definitions()
-    return {"universes": universes, "count": len(universes)}
+    universes = _list_universe_entries()
+    payload: dict[str, Any] = {"universes": universes, "count": len(universes)}
+    if not universes:
+        payload["detail"] = "No universe files found in configured universe directories."
+    return payload
 
 
 @app.get("/scan/universe")
@@ -3462,8 +3537,39 @@ async def get_scan_universe(universe_name: str):
 async def get_universe_definition(universe_name: str):
     normalized_input = (universe_name or "").strip().lower()
     if normalized_input == "list":
-        universes = _list_universe_definitions()
-        return {"universes": universes, "count": len(universes)}
+        universes = _list_universe_entries()
+        payload: dict[str, Any] = {"universes": universes, "count": len(universes)}
+        if not universes:
+            payload["detail"] = "No universe files found in configured universe directories."
+        return payload
+
+    if normalized_input in {"all", "default", "*"}:
+        entries = _list_universe_entries()
+        all_entry = next((x for x in entries if str(x.get("name") or "").lower() == "all"), None)
+        symbols: set[str] = set()
+        for item in entries:
+            name = str(item.get("name") or "").strip().lower()
+            if not name or name == "all":
+                continue
+            try:
+                tickers = _load_universe_symbols_from_path(Path(str(item.get("path") or "")))
+            except Exception:
+                continue
+            for ticker in tickers:
+                cleaned = _sanitize_symbol(ticker)
+                if cleaned:
+                    symbols.add(cleaned)
+        tickers_sorted = sorted(symbols)
+        return {
+            "name": "all",
+            "tickers": tickers_sorted,
+            "count": len(tickers_sorted),
+            "meta": {
+                "source": "dynamic_union",
+                "path": str((all_entry or {}).get("path") or "dynamic:all"),
+                "updated_at": (all_entry or {}).get("updated_at"),
+            },
+        }
 
     universe_name = _normalize_universe_alias(universe_name)
     known_names = _list_universe_definitions()
@@ -3477,11 +3583,12 @@ async def get_universe_definition(universe_name: str):
         raise HTTPException(
             status_code=404,
             detail={
-                "error": "not_found",
-                "message": f"Universe '{universe_name}' was not found.",
-                "known_universes": known_names,
+                "detail": "Universe file not found",
+                "name": str(universe_name),
                 "looked_in": looked_in,
                 "supported_extensions": supported,
+                "searched_paths": looked_in,
+                "known_universes": known_names,
             },
         )
     except ValueError as exc:
@@ -4559,7 +4666,8 @@ async def get_scheduler_status():
         return scheduler.get_status()
 
     except Exception as exc:
-        _raise_if_scheduler_dependency_missing(exc)
+        if _is_apscheduler_missing(exc):
+            return _scheduler_dependency_response()
         return {"running": False, "error": str(exc)}
 
 
@@ -4574,7 +4682,8 @@ async def start_scheduler():
         return {"status": "started"}
 
     except Exception as exc:
-        _raise_if_scheduler_dependency_missing(exc)
+        if _is_apscheduler_missing(exc):
+            return _scheduler_dependency_response()
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -4589,7 +4698,8 @@ async def stop_scheduler():
         return {"status": "stopped"}
 
     except Exception as exc:
-        _raise_if_scheduler_dependency_missing(exc)
+        if _is_apscheduler_missing(exc):
+            return _scheduler_dependency_response()
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -4606,7 +4716,8 @@ async def run_scheduler_job(job_id: str):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
-        _raise_if_scheduler_dependency_missing(exc)
+        if _is_apscheduler_missing(exc):
+            return _scheduler_dependency_response()
         raise HTTPException(status_code=500, detail=str(exc))
 
 
