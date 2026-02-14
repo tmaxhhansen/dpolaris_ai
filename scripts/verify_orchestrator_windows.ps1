@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 param(
-    [string]$Host = "127.0.0.1",
+    [string]$ApiHost = "127.0.0.1",
     [int]$Port = 8420,
     [int]$TimeoutSec = 20
 )
@@ -22,16 +22,17 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $OrchPidFile = Join-Path $RunDir "orchestrator.pid"
 $BackendPidFile = Join-Path $RunDir "backend.pid"
-$OrchLog = Join-Path $LogDir "verify_orchestrator.log"
+$OrchOutLog = Join-Path $LogDir "verify_orchestrator_out.log"
+$OrchErrLog = Join-Path $LogDir "verify_orchestrator_err.log"
 
 function Get-PortOwnerPid([int]$PortNum) {
     $rows = netstat -ano -p tcp | Select-String ":$PortNum" | Select-String "LISTENING"
     foreach ($row in $rows) {
         $parts = ($row.ToString() -split "\s+") | Where-Object { $_ -ne "" }
         if ($parts.Length -ge 5) {
-            $pid = 0
-            if ([int]::TryParse($parts[-1], [ref]$pid)) {
-                return $pid
+            $listenerPid = 0
+            if ([int]::TryParse($parts[-1], [ref]$listenerPid)) {
+                return $listenerPid
             }
         }
     }
@@ -42,10 +43,10 @@ function Kill-ManagedPidFile([string]$Path) {
     if (-not (Test-Path $Path)) { return }
     $txt = (Get-Content $Path -Raw).Trim()
     if (-not $txt) { return }
-    $pid = 0
-    if (-not [int]::TryParse($txt, [ref]$pid)) { return }
+    $managedPid = 0
+    if (-not [int]::TryParse($txt, [ref]$managedPid)) { return }
     try {
-        Stop-Process -Id $pid -Force -ErrorAction Stop
+        Stop-Process -Id $managedPid -Force -ErrorAction Stop
     } catch {}
 }
 
@@ -60,15 +61,15 @@ if ($owner) {
 Write-Host "Starting orchestrator with venv python: $PythonExe"
 $proc = Start-Process -FilePath $PythonExe -ArgumentList @(
     "-m", "cli.main", "orchestrator",
-    "--host", $Host,
+    "--host", $ApiHost,
     "--port", "$Port",
     "--interval-health", "60",
     "--interval-scan", "30m",
     "--dry-run"
-) -WorkingDirectory $RepoRoot -PassThru -RedirectStandardOutput $OrchLog -RedirectStandardError $OrchLog
+) -WorkingDirectory $RepoRoot -PassThru -RedirectStandardOutput $OrchOutLog -RedirectStandardError $OrchErrLog
 
-$healthUrl = "http://$Host`:$Port/health"
-$statusUrl = "http://$Host`:$Port/api/orchestrator/status"
+$healthUrl = "http://$ApiHost`:$Port/health"
+$statusUrl = "http://$ApiHost`:$Port/api/orchestrator/status"
 $deadline = (Get-Date).AddSeconds($TimeoutSec)
 $healthOk = $false
 $statusOk = $false
