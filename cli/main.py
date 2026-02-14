@@ -18,10 +18,12 @@ Usage:
 """
 
 import asyncio
+import errno
 import logging
 import os
 import sys
 import signal
+import socket
 from pathlib import Path
 from datetime import datetime
 
@@ -33,6 +35,19 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
+
+
+def _is_port_in_use(host: str, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, int(port)))
+        return False
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE or getattr(exc, "winerror", None) == 10048:
+            return True
+        raise
+    finally:
+        sock.close()
 
 
 def get_components():
@@ -300,8 +315,13 @@ def performance():
 @cli.command()
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
 @click.option("--port", default=8420, help="Port to bind to")
-def server(host: str, port: int):
+@click.option("--force", is_flag=True, help="Attempt start even if port is already in use")
+def server(host: str, port: int, force: bool):
     """Start the API server"""
+    if not force and _is_port_in_use(host, port):
+        console.print(f"[yellow]Server already running on :{port}[/yellow]")
+        return
+
     console.print(f"Starting dPolaris API server at http://{host}:{port}")
 
     from api import run_server
