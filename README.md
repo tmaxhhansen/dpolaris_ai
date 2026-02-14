@@ -10,6 +10,19 @@ Always run server and orchestrator with the venv interpreter, not system Python.
 C:\my-git\dpolaris_ai\.venv\Scripts\python.exe -m cli.main server --host 127.0.0.1 --port 8420
 ```
 
+### One-command clean start (Windows, deterministic port ownership)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_server_clean.ps1
+```
+
+Quick checks:
+
+```powershell
+irm http://127.0.0.1:8420/health
+irm http://127.0.0.1:8420/api/debug/port-owner
+```
+
 ### Start orchestrator
 
 ```powershell

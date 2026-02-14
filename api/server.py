@@ -244,6 +244,70 @@ def _find_pid_on_port(port: int) -> Optional[int]:
     return None
 
 
+def _port_owner_via_psutil(port: int) -> tuple[Optional[int], Optional[str]]:
+    if psutil is None:
+        return None, None
+    try:
+        for conn in psutil.net_connections(kind="tcp"):
+            laddr = getattr(conn, "laddr", None)
+            status = str(getattr(conn, "status", "")).upper()
+            if not laddr or status != "LISTEN":
+                continue
+            if int(getattr(laddr, "port", -1)) != int(port):
+                continue
+            pid = getattr(conn, "pid", None)
+            if not pid:
+                return None, None
+            cmdline = _pid_cmdline(int(pid))
+            return int(pid), cmdline
+    except Exception:
+        return None, None
+    return None, None
+
+
+def _port_owner_via_netstat_cim(port: int) -> tuple[Optional[int], Optional[str]]:
+    pid = _find_pid_on_port(int(port))
+    if not pid:
+        return None, None
+
+    cmdline = None
+    if os.name == "nt":
+        try:
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    (
+                        "$p = Get-CimInstance Win32_Process -Filter \"ProcessId = "
+                        f"{int(pid)}\"; if ($p) {{ $p.CommandLine }}"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode == 0:
+                text = (proc.stdout or "").strip()
+                if text:
+                    cmdline = text
+        except Exception:
+            cmdline = None
+    return int(pid), cmdline
+
+
+def _is_repo_server_cmdline(cmdline: Optional[str], port: int = 8420) -> bool:
+    if not cmdline:
+        return False
+    cmd = str(cmdline).lower()
+    repo = str(_repo_root()).lower()
+    return (
+        repo in cmd
+        and "-m cli.main server" in cmd
+        and f"--port {int(port)}" in cmd
+    )
+
+
 def _orchestrator_runtime_status(
     *,
     data_dir: Path,
@@ -2696,6 +2760,29 @@ class ScanStartRequest(BaseModel):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/debug/port-owner")
+async def debug_port_owner(port: int = Query(8420, ge=1, le=65535)):
+    """Inspect TCP port owner for local backend diagnostics."""
+    owner_pid = None
+    owner_cmdline = None
+    source = "none"
+
+    if psutil is not None:
+        owner_pid, owner_cmdline = _port_owner_via_psutil(int(port))
+        source = "psutil"
+    if owner_pid is None:
+        owner_pid, owner_cmdline = _port_owner_via_netstat_cim(int(port))
+        source = "netstat+cim"
+
+    return {
+        "port": int(port),
+        "owner_pid": owner_pid,
+        "owner_cmdline": owner_cmdline,
+        "matches_repo_server_signature": _is_repo_server_cmdline(owner_cmdline, port=int(port)),
+        "source": source,
+    }
 
 
 # --- Portfolio ---
