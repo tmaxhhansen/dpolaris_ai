@@ -64,3 +64,7 @@ scripts/*.ps1
 # Windows requirements lock snapshots are local unless intentionally tracked
 requirements-windows.lock.txt
 
+# Build outputs
+build/
+**/build/
+
