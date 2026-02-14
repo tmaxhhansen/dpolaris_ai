@@ -107,7 +107,7 @@ SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
 KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
-SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml"}
+SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
 LISTABLE_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
@@ -879,18 +879,49 @@ def _normalize_universe_name(universe_name: str) -> str:
     return name
 
 
-def _list_universe_definitions() -> list[str]:
-    universe_dir = _repo_root() / "universe"
-    if not universe_dir.exists() or not universe_dir.is_dir():
-        return []
+def _configured_universe_dirs() -> list[Path]:
+    roots: list[Path] = []
+    repo_universe = (_repo_root() / "universe").resolve()
+    roots.append(repo_universe)
 
-    names: set[str] = set()
-    for entry in universe_dir.iterdir():
-        if entry.name.startswith(".") or entry.name == "__pycache__":
+    raw = str(os.getenv("DPOLARIS_UNIVERSE_DIR", "universe")).strip()
+    if raw:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = (_repo_root() / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        if all(candidate != existing for existing in roots):
+            roots.append(candidate)
+    return roots
+
+
+def _discover_universe_definitions() -> list[dict[str, str]]:
+    discovered: dict[str, dict[str, str]] = {}
+    for root in _configured_universe_dirs():
+        if not root.exists() or not root.is_dir():
             continue
-        if entry.is_file() and entry.suffix.lower() in LISTABLE_UNIVERSE_EXTENSIONS:
-            names.add(entry.stem)
-    return sorted(names)
+        for entry in root.iterdir():
+            if entry.name.startswith(".") or entry.name == "__pycache__":
+                continue
+            if not entry.is_file() or entry.suffix.lower() not in LISTABLE_UNIVERSE_EXTENSIONS:
+                continue
+            name = entry.stem
+            current = discovered.get(name)
+            payload = {"name": name, "source": "file", "path": str(entry.resolve())}
+            if current is None:
+                discovered[name] = payload
+                continue
+            # Prefer files from the primary repo universe directory.
+            if str(current.get("path", "")).startswith(str((_repo_root() / "universe").resolve())):
+                continue
+            if str(entry.resolve()).startswith(str((_repo_root() / "universe").resolve())):
+                discovered[name] = payload
+    return [discovered[name] for name in sorted(discovered.keys())]
+
+
+def _list_universe_definitions() -> list[str]:
+    return [item["name"] for item in _discover_universe_definitions()]
 
 
 def _extract_tickers_from_container(values: list[Any], seen: set[str], output: list[str]) -> None:
@@ -943,69 +974,52 @@ def _load_universe_file_payload(path: Path) -> Any:
             raise ValueError("YAML support unavailable. Install dependency with: pip install PyYAML")
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
+    if suffix == ".txt":
+        with open(path, "r", encoding="utf-8") as f:
+            tickers = []
+            seen: set[str] = set()
+            for raw_line in f.readlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                symbol = _sanitize_symbol(line)
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                tickers.append(symbol)
+        return {"tickers": tickers, "format": "text"}
     raise ValueError(
-        f"Unknown universe file format '{suffix}' for {path}. Supported formats: .json, .yaml, .yml"
+        f"Unknown universe file format '{suffix}' for {path}. Supported formats: .json, .yaml, .yml, .txt"
     )
 
 
 def _resolve_universe_definition_path(universe_name: str) -> tuple[str, Path]:
     requested = _normalize_universe_name(universe_name)
     display_name = Path(requested).stem
-    universe_dir = _repo_root() / "universe"
-    universe_dir.mkdir(parents=True, exist_ok=True)
+    roots = _configured_universe_dirs()
+    if roots:
+        roots[0].mkdir(parents=True, exist_ok=True)
 
-    direct = universe_dir / requested
-    if direct.exists():
-        if direct.is_dir():
-            choices = []
-            for candidate in (
-                f"{display_name}.json",
-                f"{display_name}.yaml",
-                f"{display_name}.yml",
-                "universe.json",
-                "universe.yaml",
-                "universe.yml",
-                "tickers.json",
-                "tickers.yaml",
-                "tickers.yml",
-                "index.json",
-                "index.yaml",
-                "index.yml",
-            ):
-                path = direct / candidate
-                if path.exists() and path.is_file():
-                    choices.append(path.resolve())
-            if not choices:
-                choices = sorted(
-                    [
-                        p.resolve()
-                        for p in direct.iterdir()
-                        if p.is_file() and p.suffix.lower() in SUPPORTED_UNIVERSE_EXTENSIONS
-                    ]
-                )
-            if not choices:
-                raise ValueError(
-                    f"Unknown universe folder format: {direct}. Add a .json/.yaml/.yml definition file."
-                )
-            return display_name, choices[0]
-
-        if direct.is_file():
+    for universe_dir in roots:
+        direct = universe_dir / requested
+        if direct.exists() and direct.is_file():
             if direct.suffix.lower() not in SUPPORTED_UNIVERSE_EXTENSIONS:
                 raise ValueError(
-                    f"Unknown universe file format for {direct}. Supported formats: .json, .yaml, .yml"
+                    f"Unknown universe file format for {direct}. Supported formats: .json, .yaml, .yml, .txt"
                 )
             return Path(requested).stem, direct.resolve()
 
-    for ext in (".json", ".yaml", ".yml"):
-        candidate = universe_dir / f"{display_name}{ext}"
-        if candidate.exists() and candidate.is_file():
-            return display_name, candidate.resolve()
+        for ext in (".json", ".yaml", ".yml", ".txt"):
+            candidate = universe_dir / f"{display_name}{ext}"
+            if candidate.exists() and candidate.is_file():
+                return display_name, candidate.resolve()
 
     generated = _ensure_default_universe_file(display_name)
     if generated is not None and generated.exists() and generated.is_file():
         return display_name, generated.resolve()
 
-    raise FileNotFoundError(f"Universe '{display_name}' not found in {universe_dir}")
+    searched = [str(path) for path in roots]
+    raise FileNotFoundError(f"Universe '{display_name}' not found. Searched: {searched}")
 
 
 def _normalize_universe_alias(universe_name: str) -> str:
@@ -3402,8 +3416,9 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 @app.get("/scan/universe/list")
 @app.get("/api/scan/universe/list")
 async def list_universe_definitions():
-    """List available universe definition names under ./universe."""
-    return _list_universe_definitions()
+    """List available universe definitions."""
+    universes = _discover_universe_definitions()
+    return {"universes": universes, "count": len(universes)}
 
 
 @app.get("/scan/universe")
@@ -3414,13 +3429,7 @@ async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
 
 @app.get("/scan/universe/{universe_name}")
 @app.get("/api/scan/universe/{universe_name}")
-@app.get("/universe/{universe_name}")
-@app.get("/api/universe/{universe_name}")
 async def get_scan_universe(universe_name: str):
-    normalized_input = (universe_name or "").strip().lower()
-    if normalized_input == "list":
-        return _list_universe_definitions()
-
     universe_name = _normalize_universe_alias(universe_name)
     try:
         normalized_name, path = _resolve_universe_definition_path(universe_name)
@@ -3443,6 +3452,48 @@ async def get_scan_universe(universe_name: str):
         response["schema_version"] = payload.get("schema_version")
         response["universe"] = payload
     return response
+
+
+@app.get("/universe/{universe_name}")
+@app.get("/api/universe/{universe_name}")
+async def get_universe_definition(universe_name: str):
+    normalized_input = (universe_name or "").strip().lower()
+    if normalized_input == "list":
+        universes = _discover_universe_definitions()
+        return {"universes": universes, "count": len(universes)}
+
+    universe_name = _normalize_universe_alias(universe_name)
+    known_names = _list_universe_definitions()
+    try:
+        normalized_name, path = _resolve_universe_definition_path(universe_name)
+        payload = _load_universe_file_payload(path)
+        tickers = _extract_universe_tickers(payload, path)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_found",
+                "message": f"Universe '{universe_name}' was not found.",
+                "known_universes": known_names,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    meta: dict[str, Any] = {"source": "file", "path": str(path)}
+    if isinstance(payload, dict):
+        for key in ("generated_at", "universe_hash", "schema_version", "format"):
+            if key in payload:
+                meta[key] = payload.get(key)
+
+    return {
+        "name": normalized_name,
+        "tickers": tickers,
+        "count": len(tickers),
+        "meta": meta,
+    }
 
 
 @app.get("/scan/runs")
