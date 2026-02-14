@@ -33,3 +33,27 @@ __pycache__/
 *.sqlite3
 *.db
 
+# Windows/local runtime artifacts
+tmp_*.log
+tmp_server_*.log
+*.tmp
+
+# Local generated run artifacts
+runs/
+.runtime/
+dpolaris_data/
+**/dpolaris_data/
+
+# Script logs and local helper outputs
+scripts/*_out.log
+scripts/*_err.log
+scripts/*.log
+
+# Keep preferred Python smoke scripts; ignore local PowerShell helpers by default
+scripts/*.ps1
+!scripts/smoke_test.py
+!scripts/orchestrator_smoke.py
+
+# Windows requirements lock snapshots are local unless intentionally tracked
+requirements-windows.lock.txt
+
