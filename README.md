@@ -68,13 +68,13 @@ pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_deep_learning_job.ps1
 List universes:
 
 ```powershell
-curl http://127.0.0.1:8420/api/universe/list
+irm http://127.0.0.1:8420/api/universe/list
 ```
 
 Fetch one universe:
 
 ```powershell
-curl http://127.0.0.1:8420/api/universe/combined_1000
+irm http://127.0.0.1:8420/api/universe/combined_1000
 ```
 
 Expected response shape:

@@ -3319,6 +3319,9 @@ async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
 @app.get("/universe/{universe_name}")
 @app.get("/api/universe/{universe_name}")
 async def get_scan_universe(universe_name: str):
+    # Defensive guard: if a router ordering issue captures "list" here, return list payload.
+    if str(universe_name).strip().lower() == "list":
+        return _list_universe_definitions()
     try:
         normalized_name, path = _resolve_universe_definition_path(universe_name)
         payload = _load_universe_file_payload(path)
