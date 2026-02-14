@@ -60,6 +60,8 @@ scripts/*.ps1
 !scripts/smoke_universe_list.ps1
 !scripts/reset_8420.ps1
 !scripts/start_server_clean.ps1
+!scripts/bootstrap_windows.ps1
+!scripts/windows_bootstrap.ps1
 
 # Windows requirements lock snapshots are local unless intentionally tracked
 requirements-windows.lock.txt
