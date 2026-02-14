@@ -56,6 +56,7 @@ scripts/*.ps1
 !scripts/verify_orchestrator_windows.ps1
 !scripts/install_torch_gpu.ps1
 !scripts/smoke_deep_learning_job.ps1
+!scripts/smoke_universe_list.ps1
 
 # Windows requirements lock snapshots are local unless intentionally tracked
 requirements-windows.lock.txt

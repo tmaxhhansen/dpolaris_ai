@@ -75,6 +75,8 @@ Quick smoke:
 
 ```powershell
 irm http://127.0.0.1:8420/api/universe/list
+irm http://127.0.0.1:8420/api/scan/universe/list
+pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_universe_list.ps1
 ```
 
 Fetch one universe:

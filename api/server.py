@@ -3301,6 +3301,8 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 
 @app.get("/universe/list")
 @app.get("/api/universe/list")
+@app.get("/scan/universe/list")
+@app.get("/api/scan/universe/list")
 async def list_universe_definitions():
     """List available universe definition names under ./universe."""
     return _list_universe_definitions()
