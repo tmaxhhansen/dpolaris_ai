@@ -67,8 +67,11 @@ def main() -> int:
         print("PASS: /health")
 
         status, payload = get_json("/api/universe/list")
-        if status != 200 or not isinstance(payload, dict) or "names" not in payload:
+        if status != 200 or not isinstance(payload, dict) or "universes" not in payload:
             print(f"FAIL: /api/universe/list status={status} payload={payload}")
+            return 1
+        if not isinstance(payload.get("universes"), list):
+            print(f"FAIL: /api/universe/list universes is not a list: payload={payload}")
             return 1
         print("PASS: /api/universe/list")
         print(json.dumps(payload))

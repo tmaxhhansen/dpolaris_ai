@@ -6,6 +6,7 @@ Provides REST API and WebSocket endpoints for the Mac app.
 
 import asyncio
 import copy
+import csv
 import hashlib
 import json
 import os
@@ -107,8 +108,8 @@ SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
 KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
-SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
-LISTABLE_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt"}
+SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt", ".csv"}
+LISTABLE_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml", ".txt", ".csv"}
 DEFAULT_UNIVERSE_ALIASES = {
     "nasdaq_top_500": "nasdaq_top_500",
     "wsb_top_500": "wsb_top_500",
@@ -975,6 +976,45 @@ def _build_universe_file_inventory() -> tuple[dict[str, str], list[dict[str, Any
     }, files
 
 
+def _universe_source_from_path(path: Path) -> str:
+    resolved = path.resolve()
+    repo_dir = (_repo_root() / "universe").resolve()
+    data_dir = (Path.home() / "dpolaris_data" / "universe").resolve()
+    if str(resolved).startswith(str(repo_dir)):
+        return "repo"
+    if str(resolved).startswith(str(data_dir)):
+        return "data"
+    return "repo"
+
+
+def _list_universe_entries_for_api() -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for item in _discover_universe_definitions():
+        name = str(item.get("name") or "").strip()
+        path_str = str(item.get("path") or "").strip()
+        if not name or not path_str:
+            continue
+        path = Path(path_str)
+        if name in seen_names:
+            continue
+        try:
+            symbol_count = len(_load_universe_symbols_from_path(path))
+        except Exception:
+            symbol_count = 0
+        entries.append(
+            {
+                "name": name,
+                "count": int(symbol_count),
+                "source": _universe_source_from_path(path),
+                "path": str(path.resolve()),
+            }
+        )
+        seen_names.add(name)
+    entries.sort(key=lambda x: str(x.get("name") or "").lower())
+    return entries
+
+
 def _load_universe_symbols_from_path(path: Path) -> list[str]:
     payload = _load_universe_file_payload(path)
     return _extract_universe_tickers(payload, path)
@@ -1125,8 +1165,25 @@ def _load_universe_file_payload(path: Path) -> Any:
                 seen.add(symbol)
                 tickers.append(symbol)
         return {"tickers": tickers, "format": "text"}
+    if suffix == ".csv":
+        tickers = []
+        seen: set[str] = set()
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if not row:
+                    continue
+                candidate = str(row[0]).strip()
+                if not candidate or candidate.startswith("#"):
+                    continue
+                symbol = _sanitize_symbol(candidate)
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                tickers.append(symbol)
+        return {"tickers": tickers, "format": "csv"}
     raise ValueError(
-        f"Unknown universe file format '{suffix}' for {path}. Supported formats: .json, .yaml, .yml, .txt"
+        f"Unknown universe file format '{suffix}' for {path}. Supported formats: .json, .yaml, .yml, .txt, .csv"
     )
 
 
@@ -1142,11 +1199,11 @@ def _resolve_universe_definition_path(universe_name: str) -> tuple[str, Path]:
         if direct.exists() and direct.is_file():
             if direct.suffix.lower() not in SUPPORTED_UNIVERSE_EXTENSIONS:
                 raise ValueError(
-                    f"Unknown universe file format for {direct}. Supported formats: .json, .yaml, .yml, .txt"
+                    f"Unknown universe file format for {direct}. Supported formats: .json, .yaml, .yml, .txt, .csv"
                 )
             return Path(requested).stem, direct.resolve()
 
-        for ext in (".json", ".yaml", ".yml", ".txt"):
+        for ext in (".json", ".yaml", ".yml", ".txt", ".csv"):
             candidate = universe_dir / f"{display_name}{ext}"
             if candidate.exists() and candidate.is_file():
                 return display_name, candidate.resolve()
@@ -3557,17 +3614,12 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 @app.get("/api/scan/universe/list")
 async def list_universe_definitions():
     """List available universe definitions."""
-    universes = _list_universe_entries()
-    names = sorted({str(item.get("name") or "") for item in universes if str(item.get("name") or "")})
-    sources, files = _build_universe_file_inventory()
+    universes = _list_universe_entries_for_api()
     payload: dict[str, Any] = {
-        "names": names,
-        "count": len(names),
-        "sources": sources,
-        "files": files,
         "universes": universes,
+        "total": len(universes),
     }
-    if not names:
+    if not universes:
         payload["detail"] = "No universe files found in configured universe directories."
     return payload
 
@@ -3620,8 +3672,8 @@ async def get_universe_all():
 async def get_universe_definition(universe_name: str):
     normalized_input = (universe_name or "").strip().lower()
     if normalized_input == "list":
-        universes = _list_universe_entries()
-        payload: dict[str, Any] = {"universes": universes, "count": len(universes)}
+        universes = _list_universe_entries_for_api()
+        payload: dict[str, Any] = {"universes": universes, "total": len(universes)}
         if not universes:
             payload["detail"] = "No universe files found in configured universe directories."
         return payload
@@ -3647,6 +3699,8 @@ async def get_universe_definition(universe_name: str):
             "name": "all",
             "tickers": tickers_sorted,
             "count": len(tickers_sorted),
+            "source": "repo",
+            "path": str((all_entry or {}).get("path") or "dynamic:all"),
             "meta": {
                 "source": "dynamic_union",
                 "path": str((all_entry or {}).get("path") or "dynamic:all"),
@@ -3689,6 +3743,8 @@ async def get_universe_definition(universe_name: str):
         "name": normalized_name,
         "tickers": tickers,
         "count": len(tickers),
+        "source": _universe_source_from_path(path),
+        "path": str(path.resolve()),
         "meta": meta,
     }
 
