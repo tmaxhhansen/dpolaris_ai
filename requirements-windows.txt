@@ -11,5 +11,6 @@ numpy
 pandas
 yfinance
 psutil
+apscheduler
 torch
 scikit-learn

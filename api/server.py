@@ -369,6 +369,28 @@ def _require_llm_enabled() -> None:
         raise HTTPException(status_code=503, detail=_llm_disabled_detail())
 
 
+def _scheduler_dependency_detail() -> dict[str, str]:
+    return {
+        "error": "missing_dependency",
+        "dependency": "apscheduler",
+        "install": "pip install apscheduler",
+    }
+
+
+def _is_apscheduler_missing(exc: Exception) -> bool:
+    if isinstance(exc, ModuleNotFoundError):
+        return exc.name == "apscheduler"
+    if isinstance(exc, ImportError):
+        return "apscheduler" in str(exc).lower()
+    return False
+
+
+def _raise_if_scheduler_dependency_missing(exc: Exception) -> bool:
+    if not _is_apscheduler_missing(exc):
+        return False
+    raise HTTPException(status_code=503, detail=_scheduler_dependency_detail())
+
+
 def _trim_training_jobs() -> None:
     if len(training_job_order) <= MAX_TRAINING_JOBS:
         return
@@ -2764,6 +2786,8 @@ async def delete_alert(alert_id: int):
 async def get_ai_status():
     """Get AI daemon/status summary for the app dashboard."""
     daemon_running = False
+    scheduler_available = False
+    scheduler_error: Optional[dict[str, str]] = None
     scheduler_activity_times: list[datetime] = []
 
     try:
@@ -2771,13 +2795,16 @@ async def get_ai_status():
 
         scheduler = get_scheduler()
         scheduler_status = scheduler.get_status()
+        scheduler_available = True
         daemon_running = bool(scheduler_status.get("running", False))
 
         for key in ("last_training", "last_news_scan", "last_prediction", "last_sync"):
             parsed = _parse_timestamp(scheduler_status.get(key))
             if parsed is not None:
                 scheduler_activity_times.append(parsed)
-    except Exception:
+    except Exception as exc:
+        if _is_apscheduler_missing(exc):
+            scheduler_error = _scheduler_dependency_detail()
         # Scheduler is optional in local/dev flows.
         pass
 
@@ -2828,6 +2855,8 @@ async def get_ai_status():
 
     return {
         "daemon_running": daemon_running,
+        "scheduler_available": scheduler_available,
+        "scheduler_error": scheduler_error,
         "last_activity": last_activity,
         "total_memories": total_memories,
         "total_trades": total_trades,
@@ -4210,8 +4239,9 @@ async def get_scheduler_status():
         scheduler = get_scheduler()
         return scheduler.get_status()
 
-    except Exception as e:
-        return {"running": False, "error": str(e)}
+    except Exception as exc:
+        _raise_if_scheduler_dependency_missing(exc)
+        return {"running": False, "error": str(exc)}
 
 
 @app.post("/api/scheduler/start")
@@ -4224,8 +4254,9 @@ async def start_scheduler():
         scheduler.start()
         return {"status": "started"}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        _raise_if_scheduler_dependency_missing(exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/scheduler/stop")
@@ -4238,8 +4269,9 @@ async def stop_scheduler():
         scheduler.stop()
         return {"status": "stopped"}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        _raise_if_scheduler_dependency_missing(exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/scheduler/run/{job_id}")
@@ -4252,10 +4284,11 @@ async def run_scheduler_job(job_id: str):
         await scheduler.run_now(job_id)
         return {"status": "completed", "job": job_id}
 
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        _raise_if_scheduler_dependency_missing(exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # --- Cloud Sync ---
