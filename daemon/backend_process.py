@@ -63,16 +63,8 @@ class BackendProcessManager:
         self._run_dir = self.config.data_dir / "run"
         self._logs_dir = self.config.data_dir / "logs"
         self._pid_file = self._run_dir / "backend.pid"
-        try:
-            self._run_dir.mkdir(parents=True, exist_ok=True)
-            self._logs_dir.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            fallback_root = self.config.workdir / ".runtime" / "dpolaris_data"
-            self._run_dir = fallback_root / "run"
-            self._logs_dir = fallback_root / "logs"
-            self._pid_file = self._run_dir / "backend.pid"
-            self._run_dir.mkdir(parents=True, exist_ok=True)
-            self._logs_dir.mkdir(parents=True, exist_ok=True)
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        self._logs_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def run_dir(self) -> Path:
