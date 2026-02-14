@@ -53,6 +53,7 @@ class BackendProcessManager:
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
         self._tail = deque(maxlen=max(50, int(self.config.tail_lines)))
+        self._last_takeover_killed_pids: list[int] = []
         self._started_at: Optional[dt.datetime] = None
         self._last_restart_at: Optional[dt.datetime] = None
         self._restart_events: deque[dt.datetime] = deque(maxlen=2048)
@@ -115,6 +116,10 @@ class BackendProcessManager:
             items = list(self._tail)
         return items[-n:]
 
+    def get_last_takeover_killed_pids(self) -> list[int]:
+        with self._lock:
+            return list(self._last_takeover_killed_pids)
+
     def check_health(self, timeout_seconds: Optional[float] = None) -> bool:
         timeout = timeout_seconds if timeout_seconds is not None else self.config.health_timeout_seconds
         try:
@@ -146,11 +151,8 @@ class BackendProcessManager:
                 return int(self._process.pid)  # type: ignore[arg-type]
 
             self._terminate_stale_managed_pid()
-
-            owner_pid = self._find_pid_on_port(self.config.port)
-            managed_pid = self._read_pid_file()
-            if owner_pid is not None and owner_pid != managed_pid:
-                raise PortInUseByUnknownProcessError(pid=owner_pid, port=self.config.port)
+            killed = self._take_over_port_windows()
+            self._last_takeover_killed_pids = killed
 
             cmd = [
                 str(self.config.python_exe),
@@ -194,6 +196,12 @@ class BackendProcessManager:
             self._start_stream_thread(process.stdout, "STDOUT")
             self._start_stream_thread(process.stderr, "STDERR")
             return int(process.pid)
+
+    def take_over_port(self) -> list[int]:
+        with self._lock:
+            killed = self._take_over_port_windows()
+            self._last_takeover_killed_pids = killed
+            return list(killed)
 
     def stop_backend(self) -> None:
         with self._lock:
@@ -321,6 +329,12 @@ class BackendProcessManager:
 
     @staticmethod
     def _find_pid_on_port(port: int) -> Optional[int]:
+        pids = BackendProcessManager._find_pids_on_port(port)
+        return pids[0] if pids else None
+
+    @staticmethod
+    def _find_pids_on_port(port: int) -> list[int]:
+        found: list[int] = []
         try:
             if os.name == "nt":
                 proc = subprocess.run(
@@ -337,7 +351,9 @@ class BackendProcessManager:
                     if not parts:
                         continue
                     try:
-                        return int(parts[-1])
+                        pid = int(parts[-1])
+                        if pid not in found:
+                            found.append(pid)
                     except Exception:
                         continue
             else:
@@ -349,10 +365,44 @@ class BackendProcessManager:
                 )
                 first = (proc.stdout or "").strip().splitlines()
                 if first:
-                    return int(first[0].strip())
+                    for raw in first:
+                        try:
+                            pid = int(raw.strip())
+                            if pid not in found:
+                                found.append(pid)
+                        except Exception:
+                            continue
         except Exception:
-            return None
-        return None
+            return []
+        return found
+
+    def _take_over_port_windows(self) -> list[int]:
+        if os.name != "nt":
+            return []
+
+        killed: list[int] = []
+        pids = self._find_pids_on_port(self.config.port)
+        for pid in pids:
+            if pid <= 0 or pid == os.getpid():
+                continue
+            self._append_line("SYSTEM", f"port takeover killing pid={pid} on {self.config.port}")
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                killed.append(int(pid))
+            except Exception:
+                continue
+
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            if self._find_pid_on_port(self.config.port) is None:
+                break
+            time.sleep(0.25)
+        return killed
 
     @staticmethod
     def _iso(value: Optional[dt.datetime]) -> Optional[str]:

@@ -3341,6 +3341,14 @@ async def get_orchestrator_status():
 @app.post("/api/orchestrator/restart-backend")
 async def orchestrator_restart_backend():
     """Restart backend using orchestrator process manager."""
+    result: dict[str, Any] = {
+        "status": "error",
+        "killed_pids": [],
+        "started_pid": None,
+        "health_ok": False,
+        "detail": "",
+        "recent_logs_tail": [],
+    }
     try:
         runtime = _orchestrator_runtime_status(
             data_dir=(config or get_config()).data_dir,
@@ -3368,21 +3376,30 @@ async def orchestrator_restart_backend():
                 data_dir=(config or get_config()).data_dir,
             )
         )
-        manager.restart_backend(reason="api_request")
-        healthy = manager.wait_until_healthy(timeout_seconds=20)
-        result = {
-            "status": "ok" if healthy else "error",
-            "healthy": healthy,
-            "backend": manager.get_state(),
-            "orchestrator_running": runtime.get("running", False),
-        }
-        if result.get("status") != "ok":
-            raise HTTPException(status_code=500, detail=result)
+        killed = manager.take_over_port()
+        started_pid = manager.restart_backend(reason="api_request")
+        health_ok = manager.wait_until_healthy(timeout_seconds=20)
+        result.update(
+            {
+                "status": "ok" if health_ok else "error",
+                "killed_pids": killed,
+                "started_pid": started_pid,
+                "health_ok": health_ok,
+                "detail": "backend restarted" if health_ok else "backend did not become healthy before timeout",
+                "recent_logs_tail": manager.get_tail_lines(20),
+                "backend": manager.get_state(),
+                "orchestrator_running": runtime.get("running", False),
+            }
+        )
         return result
-    except HTTPException:
-        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        result.update(
+            {
+                "status": "error",
+                "detail": str(exc),
+            }
+        )
+        return result
 
 
 @app.get("/api/memories")
@@ -3615,9 +3632,11 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 async def list_universe_definitions():
     """List available universe definitions."""
     universes = _list_universe_entries_for_api()
+    names = [str(item.get("name") or "") for item in universes if str(item.get("name") or "")]
     payload: dict[str, Any] = {
         "universes": universes,
         "total": len(universes),
+        "names": names,
     }
     if not universes:
         payload["detail"] = "No universe files found in configured universe directories."
@@ -3673,7 +3692,8 @@ async def get_universe_definition(universe_name: str):
     normalized_input = (universe_name or "").strip().lower()
     if normalized_input == "list":
         universes = _list_universe_entries_for_api()
-        payload: dict[str, Any] = {"universes": universes, "total": len(universes)}
+        names = [str(item.get("name") or "") for item in universes if str(item.get("name") or "")]
+        payload: dict[str, Any] = {"universes": universes, "total": len(universes), "names": names}
         if not universes:
             payload["detail"] = "No universe files found in configured universe directories."
         return payload
