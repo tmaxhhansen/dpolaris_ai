@@ -12,3 +12,4 @@ pandas
 yfinance
 psutil
 torch
+scikit-learn

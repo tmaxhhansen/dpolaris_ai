@@ -3460,6 +3460,8 @@ async def get_dl_status():
 
     torch_importable = False
     torch_error = None
+    sklearn_importable = False
+    sklearn_error = None
     cuda_available = False
     cuda_device = None
     mps_available = False
@@ -3477,6 +3479,13 @@ async def get_dl_status():
     except Exception as exc:
         torch_error = str(exc)
 
+    try:
+        from sklearn.preprocessing import StandardScaler  # noqa: F401
+
+        sklearn_importable = True
+    except Exception as exc:
+        sklearn_error = str(exc)
+
     if torch_importable:
         try:
             from ml.deep_learning import DEVICE
@@ -3490,9 +3499,11 @@ async def get_dl_status():
             else:
                 device = "cpu"
 
-    deep_learning_enabled = torch_importable and not py313_guard_active
+    deep_learning_enabled = torch_importable and sklearn_importable and not py313_guard_active
     if not torch_importable:
         deep_learning_reason = "torch is not installed; run requirements-windows.txt or scripts/install_torch_gpu.ps1"
+    elif not sklearn_importable:
+        deep_learning_reason = "scikit-learn is not installed; run requirements-windows.txt"
     elif py313_guard_active:
         deep_learning_reason = (
             "disabled on Python 3.13 for stability; use Python 3.11/3.12 or set DPOLARIS_ALLOW_PY313_TORCH=1"
@@ -3507,6 +3518,8 @@ async def get_dl_status():
         "torch_importable": torch_importable,
         "torch_version": torch_version,
         "torch_error": torch_error,
+        "sklearn_importable": sklearn_importable,
+        "sklearn_error": sklearn_error,
         "cuda_available": cuda_available,
         "cuda_device": cuda_device,
         "mps_available": mps_available,
