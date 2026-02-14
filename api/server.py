@@ -1459,6 +1459,16 @@ async def _execute_deep_learning_subprocess(
     return payload
 
 
+def _classify_deep_learning_error(exc: Exception) -> tuple[str, str]:
+    message = str(exc)
+    lowered = message.lower()
+    if ("no module named 'torch'" in lowered) or ('no module named "torch"' in lowered):
+        return "missing_dependency:torch", message
+    if "module not found" in lowered and "torch" in lowered:
+        return "missing_dependency:torch", message
+    return "runtime_error", message
+
+
 def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
@@ -2290,10 +2300,18 @@ async def _run_deep_learning_job(job_id: str) -> None:
 
     except Exception as e:
         completed_at = utc_now_iso()
+        error_code, error_message = _classify_deep_learning_error(e)
         job["status"] = "failed"
         job["updated_at"] = completed_at
         job["completed_at"] = completed_at
-        job["error"] = str(e)
+        job["error"] = f"{error_code}: {error_message}"
+        job["result"] = {
+            "symbol": symbol,
+            "model_name": symbol,
+            "model_type": model_type,
+            "error_code": error_code,
+            "error_message": error_message,
+        }
         if write_training_artifact is not None:
             try:
                 failure_artifact = write_training_artifact(
@@ -2309,8 +2327,8 @@ async def _run_deep_learning_job(job_id: str) -> None:
                     diagnostics_summary={
                         "drift_baseline_stats": {},
                         "regime_distribution": {},
-                        "error_analysis": {"message": str(e)},
-                        "top_failure_cases": [{"stage": "deep_learning_job", "error": str(e)}],
+                        "error_analysis": {"message": error_message, "error_code": error_code},
+                        "top_failure_cases": [{"stage": "deep_learning_job", "error": error_message}],
                     },
                 )
                 job["result"] = {
@@ -2319,10 +2337,12 @@ async def _run_deep_learning_job(job_id: str) -> None:
                     "model_type": model_type,
                     "run_id": failure_artifact.get("run_id"),
                     "run_dir": failure_artifact.get("run_dir"),
+                    "error_code": error_code,
+                    "error_message": error_message,
                 }
             except Exception as artifact_exc:
                 logger.warning("Failed to write failure run artifact for job %s: %s", job_id, artifact_exc)
-        _append_training_job_log(job, f"Training failed: {e}")
+        _append_training_job_log(job, f"Training failed ({error_code}): {error_message}")
         logger.exception("Deep-learning job %s failed for %s", job_id, symbol)
 
 
@@ -3433,30 +3453,66 @@ async def train_model(symbol: str):
 @app.get("/api/deep-learning/status")
 async def get_dl_status():
     """Get deep learning system status"""
+    py_major = sys.version_info.major
+    py_minor = sys.version_info.minor
+    forced_py313 = os.getenv("DPOLARIS_ALLOW_PY313_TORCH") == "1"
+    py313_guard_active = (py_major, py_minor) >= (3, 13) and not forced_py313
+
+    torch_importable = False
+    torch_error = None
+    cuda_available = False
+    cuda_device = None
+    mps_available = False
+    device = "unknown"
+    torch_version = None
+
     try:
-        from ml.deep_learning import get_device, DEVICE
-        import torch
+        import torch  # type: ignore
 
-        py_major = sys.version_info.major
-        py_minor = sys.version_info.minor
-        forced_py313 = os.getenv("DPOLARIS_ALLOW_PY313_TORCH") == "1"
-        py313_guard_active = (py_major, py_minor) >= (3, 13) and not forced_py313
+        torch_importable = True
+        torch_version = getattr(torch, "__version__", None)
+        cuda_available = bool(torch.cuda.is_available())
+        cuda_device = torch.cuda.get_device_name(0) if cuda_available else None
+        mps_available = bool(hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    except Exception as exc:
+        torch_error = str(exc)
 
-        return {
-            "device": str(DEVICE),
-            "cuda_available": torch.cuda.is_available(),
-            "cuda_device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-            "mps_available": hasattr(torch.backends, "mps") and torch.backends.mps.is_available(),
-            "python_version": f"{py_major}.{py_minor}",
-            "deep_learning_enabled": not py313_guard_active,
-            "deep_learning_reason": (
-                "disabled on Python 3.13 for stability; use Python 3.11/3.12 or set DPOLARIS_ALLOW_PY313_TORCH=1"
-                if py313_guard_active
-                else "enabled"
-            ),
-        }
-    except Exception as e:
-        return {"error": str(e), "device": "unknown"}
+    if torch_importable:
+        try:
+            from ml.deep_learning import DEVICE
+
+            device = str(DEVICE)
+        except Exception:
+            if cuda_available:
+                device = "cuda"
+            elif mps_available:
+                device = "mps"
+            else:
+                device = "cpu"
+
+    deep_learning_enabled = torch_importable and not py313_guard_active
+    if not torch_importable:
+        deep_learning_reason = "torch is not installed; run requirements-windows.txt or scripts/install_torch_gpu.ps1"
+    elif py313_guard_active:
+        deep_learning_reason = (
+            "disabled on Python 3.13 for stability; use Python 3.11/3.12 or set DPOLARIS_ALLOW_PY313_TORCH=1"
+        )
+    else:
+        deep_learning_reason = "enabled"
+
+    return {
+        "device": device,
+        "python_executable": sys.executable,
+        "python_version": f"{py_major}.{py_minor}",
+        "torch_importable": torch_importable,
+        "torch_version": torch_version,
+        "torch_error": torch_error,
+        "cuda_available": cuda_available,
+        "cuda_device": cuda_device,
+        "mps_available": mps_available,
+        "deep_learning_enabled": deep_learning_enabled,
+        "deep_learning_reason": deep_learning_reason,
+    }
 
 
 @app.post("/api/jobs/deep-learning/train")
