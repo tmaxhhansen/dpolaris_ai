@@ -1700,9 +1700,13 @@ def _classify_deep_learning_error(exc: Exception) -> tuple[str, str]:
     message = str(exc)
     lowered = message.lower()
     if ("no module named 'torch'" in lowered) or ('no module named "torch"' in lowered):
-        return "missing_dependency:torch", message
+        return "dependency_missing: torch", "PyTorch is not installed. Install with: pip install torch"
     if "module not found" in lowered and "torch" in lowered:
-        return "missing_dependency:torch", message
+        return "dependency_missing: torch", "PyTorch is not installed. Install with: pip install torch"
+    if ("no module named 'sklearn'" in lowered) or ('no module named "sklearn"' in lowered):
+        return "dependency_missing: scikit-learn", "scikit-learn is not installed. Install with: pip install scikit-learn"
+    if "module not found" in lowered and "sklearn" in lowered:
+        return "dependency_missing: scikit-learn", "scikit-learn is not installed. Install with: pip install scikit-learn"
     return "runtime_error", message
 
 
