@@ -35,3 +35,30 @@ Do not target `C:\Users\...\Python311\python.exe`; that can break orchestrator o
 pwsh -File C:\my-git\dpolaris_ai\scripts\verify_orchestrator_windows.ps1
 ```
 
+## Deep Learning on Windows (Torch)
+
+Use venv Python only:
+
+```powershell
+C:\my-git\dpolaris_ai\.venv\Scripts\python.exe -m pip install -r C:\my-git\dpolaris_ai\requirements-windows.txt
+```
+
+### GPU preferred (RTX / CUDA)
+
+```powershell
+pwsh -File C:\my-git\dpolaris_ai\scripts\install_torch_gpu.ps1
+```
+
+### CPU fallback
+
+If GPU wheels are unavailable, CPU torch from default index is supported:
+
+```powershell
+C:\my-git\dpolaris_ai\.venv\Scripts\python.exe -m pip install torch
+```
+
+### Deep-learning smoke
+
+```powershell
+pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_deep_learning_job.ps1
+```
