@@ -942,6 +942,39 @@ def _universe_file_modified_iso(path: Path) -> Optional[str]:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
+def _build_universe_file_inventory() -> tuple[dict[str, str], list[dict[str, Any]]]:
+    repo_dir = (_repo_root() / "universe").resolve()
+    data_dir = (Path("~/dpolaris_data/universe").expanduser()).resolve()
+    files: list[dict[str, Any]] = []
+
+    for root in (repo_dir, data_dir):
+        if not root.exists() or not root.is_dir():
+            continue
+        for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in LISTABLE_UNIVERSE_EXTENSIONS:
+                continue
+            modified = _universe_file_modified_iso(entry)
+            try:
+                size = int(entry.stat().st_size)
+            except Exception:
+                size = 0
+            files.append(
+                {
+                    "name": entry.stem,
+                    "path": str(entry.resolve()),
+                    "size": size,
+                    "modified": modified,
+                }
+            )
+
+    return {
+        "repo_dir": str(repo_dir),
+        "data_dir": str(data_dir),
+    }, files
+
+
 def _load_universe_symbols_from_path(path: Path) -> list[str]:
     payload = _load_universe_file_payload(path)
     return _extract_universe_tickers(payload, path)
@@ -3525,8 +3558,16 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 async def list_universe_definitions():
     """List available universe definitions."""
     universes = _list_universe_entries()
-    payload: dict[str, Any] = {"universes": universes, "count": len(universes)}
-    if not universes:
+    names = sorted({str(item.get("name") or "") for item in universes if str(item.get("name") or "")})
+    sources, files = _build_universe_file_inventory()
+    payload: dict[str, Any] = {
+        "names": names,
+        "count": len(names),
+        "sources": sources,
+        "files": files,
+        "universes": universes,
+    }
+    if not names:
         payload["detail"] = "No universe files found in configured universe directories."
     return payload
 
