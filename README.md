@@ -62,3 +62,28 @@ C:\my-git\dpolaris_ai\.venv\Scripts\python.exe -m pip install torch
 ```powershell
 pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_deep_learning_job.ps1
 ```
+
+## Universe API (Control Center)
+
+List universes:
+
+```powershell
+curl http://127.0.0.1:8420/api/universe/list
+```
+
+Fetch one universe:
+
+```powershell
+curl http://127.0.0.1:8420/api/universe/combined_1000
+```
+
+Expected response shape:
+
+```json
+{
+  "name": "combined_1000",
+  "path": "C:\\my-git\\dpolaris_ai\\universe\\combined_1000.json",
+  "tickers": ["AAPL", "MSFT"],
+  "count": 2
+}
+```

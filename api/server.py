@@ -25,6 +25,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import numpy as np
 try:
+    import yaml
+except Exception:  # pragma: no cover
+    yaml = None
+try:
     import psutil  # type: ignore
 except Exception:  # pragma: no cover
     psutil = None
@@ -103,6 +107,7 @@ SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
 KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
+SUPPORTED_UNIVERSE_EXTENSIONS = {".json", ".yaml", ".yml"}
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
     "AMD", "INTC", "ADBE", "CSCO", "PEP", "QCOM", "TXN", "AMAT", "INTU", "BKNG",
@@ -798,6 +803,147 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
     if not normalized:
         raise ValueError(f"No tickers found in universe: {path}")
     return payload, normalized, path
+
+
+def _normalize_universe_name(universe_name: str) -> str:
+    name = (universe_name or "").strip()
+    if not name:
+        raise ValueError("Universe name is required")
+    if ".." in name or "/" in name or "\\" in name:
+        raise ValueError("Invalid universe name. Use a simple name without path separators.")
+    return name
+
+
+def _list_universe_definitions() -> list[str]:
+    names = set(KNOWN_UNIVERSE_NAMES)
+    universe_dir = _repo_root() / "universe"
+    if not universe_dir.exists() or not universe_dir.is_dir():
+        return sorted(names)
+
+    for entry in universe_dir.iterdir():
+        if entry.name.startswith(".") or entry.name == "__pycache__":
+            continue
+        if entry.is_dir():
+            names.add(entry.name)
+            continue
+        if entry.is_file() and entry.suffix.lower() in SUPPORTED_UNIVERSE_EXTENSIONS:
+            names.add(entry.stem)
+    return sorted(names)
+
+
+def _extract_tickers_from_container(values: list[Any], seen: set[str], output: list[str]) -> None:
+    for item in values:
+        if isinstance(item, str):
+            symbol = _sanitize_symbol(item)
+        elif isinstance(item, dict):
+            symbol = _sanitize_symbol(item.get("symbol") or item.get("ticker"))
+        else:
+            symbol = None
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        output.append(symbol)
+
+
+def _extract_universe_tickers(payload: Any, source_path: Path) -> list[str]:
+    candidates: list[list[Any]] = []
+    if isinstance(payload, list):
+        candidates.append(payload)
+    elif isinstance(payload, dict):
+        for key in ("tickers", "symbols", "merged", "universe", "nasdaq_top_500", "wsb_top_500", "data", "items"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                candidates.append(value)
+    else:
+        raise ValueError(f"Unsupported universe structure in {source_path}. Expected JSON/YAML list or object.")
+
+    if not candidates:
+        raise ValueError(
+            f"Unknown universe format in {source_path}. Expected keys like 'tickers', 'symbols', or 'merged'."
+        )
+
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for values in candidates:
+        _extract_tickers_from_container(values, seen, symbols)
+    if not symbols:
+        raise ValueError(f"No tickers found in universe definition: {source_path}")
+    return symbols
+
+
+def _load_universe_file_payload(path: Path) -> Any:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    if suffix in {".yaml", ".yml"}:
+        if yaml is None:
+            raise ValueError("YAML support unavailable. Install dependency with: pip install PyYAML")
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    raise ValueError(
+        f"Unknown universe file format '{suffix}' for {path}. Supported formats: .json, .yaml, .yml"
+    )
+
+
+def _resolve_universe_definition_path(universe_name: str) -> tuple[str, Path]:
+    requested = _normalize_universe_name(universe_name)
+    display_name = Path(requested).stem
+    universe_dir = _repo_root() / "universe"
+    universe_dir.mkdir(parents=True, exist_ok=True)
+
+    direct = universe_dir / requested
+    if direct.exists():
+        if direct.is_dir():
+            choices = []
+            for candidate in (
+                f"{display_name}.json",
+                f"{display_name}.yaml",
+                f"{display_name}.yml",
+                "universe.json",
+                "universe.yaml",
+                "universe.yml",
+                "tickers.json",
+                "tickers.yaml",
+                "tickers.yml",
+                "index.json",
+                "index.yaml",
+                "index.yml",
+            ):
+                path = direct / candidate
+                if path.exists() and path.is_file():
+                    choices.append(path.resolve())
+            if not choices:
+                choices = sorted(
+                    [
+                        p.resolve()
+                        for p in direct.iterdir()
+                        if p.is_file() and p.suffix.lower() in SUPPORTED_UNIVERSE_EXTENSIONS
+                    ]
+                )
+            if not choices:
+                raise ValueError(
+                    f"Unknown universe folder format: {direct}. Add a .json/.yaml/.yml definition file."
+                )
+            return display_name, choices[0]
+
+        if direct.is_file():
+            if direct.suffix.lower() not in SUPPORTED_UNIVERSE_EXTENSIONS:
+                raise ValueError(
+                    f"Unknown universe file format for {direct}. Supported formats: .json, .yaml, .yml"
+                )
+            return Path(requested).stem, direct.resolve()
+
+    for ext in (".json", ".yaml", ".yml"):
+        candidate = universe_dir / f"{display_name}{ext}"
+        if candidate.exists() and candidate.is_file():
+            return display_name, candidate.resolve()
+
+    generated = _ensure_default_universe_file(display_name)
+    if generated is not None and generated.exists() and generated.is_file():
+        return display_name, generated.resolve()
+
+    raise FileNotFoundError(f"Universe '{display_name}' not found in {universe_dir}")
 
 
 def _short_run_id(run_id: str) -> str:
@@ -3155,6 +3301,13 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
     return rows[: max(1, int(limit))]
 
 
+@app.get("/universe/list")
+@app.get("/api/universe/list")
+async def list_universe_definitions():
+    """List available universe definition names under ./universe."""
+    return _list_universe_definitions()
+
+
 @app.get("/scan/universe")
 @app.get("/api/scan/universe")
 async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
@@ -3167,21 +3320,26 @@ async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
 @app.get("/api/universe/{universe_name}")
 async def get_scan_universe(universe_name: str):
     try:
-        payload, rows, path = _load_scan_universe(universe_name)
+        normalized_name, path = _resolve_universe_definition_path(universe_name)
+        payload = _load_universe_file_payload(path)
+        tickers = _extract_universe_tickers(payload, path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {
-        "name": universe_name,
+    response = {
+        "name": normalized_name,
         "path": str(path),
-        "generated_at": payload.get("generated_at"),
-        "universe_hash": payload.get("universe_hash"),
-        "schema_version": payload.get("schema_version"),
-        "count": len(rows),
-        "universe": payload,
+        "tickers": tickers,
+        "count": len(tickers),
     }
+    if isinstance(payload, dict):
+        response["generated_at"] = payload.get("generated_at")
+        response["universe_hash"] = payload.get("universe_hash")
+        response["schema_version"] = payload.get("schema_version")
+        response["universe"] = payload
+    return response
 
 
 @app.get("/scan/runs")
