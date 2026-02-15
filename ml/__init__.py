@@ -67,6 +67,42 @@ def get_transformer_predictor():
     return TransformerPredictor
 
 
+# Device utilities (lazy load)
+def get_device_info(preference=None):
+    """Get device info for deep-learning workloads (lazy load)"""
+    from .device import get_device_info as _get_device_info
+
+    return _get_device_info(preference)
+
+
+def get_torch_device(preference=None):
+    """Get torch.device for deep-learning workloads (lazy load)"""
+    from .device import get_torch_device as _get_torch_device
+
+    return _get_torch_device(preference)
+
+
+def is_torch_available():
+    """Check if PyTorch is available (lazy load)"""
+    from .device import is_torch_available as _is_torch_available
+
+    return _is_torch_available()
+
+
+def is_sklearn_available():
+    """Check if scikit-learn is available (lazy load)"""
+    from .device import is_sklearn_available as _is_sklearn_available
+
+    return _is_sklearn_available()
+
+
+def get_dependency_status():
+    """Get ML dependency status (lazy load)"""
+    from .device import get_dependency_status as _get_dependency_status
+
+    return _get_dependency_status()
+
+
 __all__ = [
     "ModelTrainer",
     "Predictor",
@@ -74,4 +110,9 @@ __all__ = [
     "get_deep_learning_trainer",
     "get_lstm_predictor",
     "get_transformer_predictor",
+    "get_device_info",
+    "get_torch_device",
+    "is_torch_available",
+    "is_sklearn_available",
+    "get_dependency_status",
 ]
