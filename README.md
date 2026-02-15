@@ -1,5 +1,85 @@
 # dpolaris_ai
 
+## Mac Control Center Integration
+
+Use the venv Python entrypoint on macOS:
+
+```bash
+./.venv/bin/python -m cli.main server --host 127.0.0.1 --port 8420
+```
+
+The server sets `LLM_PROVIDER=none` by default for this command if not already set.
+
+### Runtime files
+
+- Managed backend PID: `~/dpolaris_data/run/backend.pid`
+- Managed backend heartbeat/status: `~/dpolaris_data/run/backend.heartbeat.json`
+
+### Backend control endpoints
+
+- `POST /api/control/backend/start?force=false`
+- `POST /api/control/backend/stop?force=false`
+- `POST /api/control/backend/restart?force=false`
+- `GET /api/control/backend/status`
+
+`GET /api/control/backend/status` includes:
+
+- `python_executable`
+- `pid`
+- `running`
+- `uptime` and `uptime_seconds`
+- `last_health`
+- `current_health`
+- `last_heartbeat`
+- `port_owner_pid` / `port_conflict`
+
+Example response (abbreviated):
+
+```json
+{
+  "status": "ok",
+  "managed": true,
+  "running": true,
+  "pid": 12345,
+  "python_executable": "/Users/you/my-git/dpolaris_ai/.venv/bin/python",
+  "uptime": "3m 12s",
+  "last_health": {"ok": true, "timestamp": "2026-02-15T10:24:05Z"},
+  "current_health": {"ok": true, "timestamp": "2026-02-15T10:24:06Z"}
+}
+```
+
+### Port ownership safety and `force=true`
+
+If port `8420` is already owned by a non-managed process, `/start` and `/restart` return HTTP `409` with structured error details and do not kill anything by default.
+
+With `force=true`, the backend will kill the port owner only when command-line/cwd checks match an allowlist:
+
+- command line contains `-m cli.main server`
+- repository path context contains `dpolaris_ai`
+
+Arbitrary processes are never force-killed.
+
+### Orchestrator control surface (for dPolaris_ops)
+
+- `GET /api/control/orchestrator/status`
+- `POST /api/control/orchestrator/start`
+- `POST /api/control/orchestrator/stop`
+
+These provide a stable API surface for external control services.
+
+### Java call pattern (recommended)
+
+1. Try `GET /api/control/backend/status`
+2. If backend unavailable, start process with `./.venv/bin/python -m cli.main server --host 127.0.0.1 --port 8420`
+3. Poll `GET /health` until HTTP `200`
+4. Use `POST /api/control/backend/restart` and `POST /api/control/backend/stop` for lifecycle operations
+
+### Smoke test
+
+```bash
+python scripts/smoke_control_center.py --host 127.0.0.1 --port 8420
+```
+
 ## Windows Orchestrator Notes
 
 Always run server and orchestrator with the venv interpreter, not system Python.
@@ -61,4 +141,103 @@ C:\my-git\dpolaris_ai\.venv\Scripts\python.exe -m pip install torch
 
 ```powershell
 pwsh -File C:\my-git\dpolaris_ai\scripts\smoke_deep_learning_job.ps1
+```
+
+## Stock Metadata & Analysis API (Java Integration)
+
+These endpoints provide stock metadata and analysis history for the Java control center's Deep Learning table.
+
+### Stock Metadata Endpoint
+
+Get sector, market cap, 7-day average volume, and 1-day change % for multiple symbols:
+
+```bash
+# macOS / Linux
+curl 'http://127.0.0.1:8420/api/stocks/metadata?symbols=AAPL,MSFT,NVDA'
+
+# Windows PowerShell
+Invoke-RestMethod -Uri 'http://127.0.0.1:8420/api/stocks/metadata?symbols=AAPL,MSFT,NVDA'
+```
+
+Response:
+```json
+{
+  "AAPL": {
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "sector": "Technology",
+    "market_cap": 3000000000000,
+    "avg_volume_7d": 50000000,
+    "change_percent_1d": 1.25,
+    "as_of": "2026-02-15T10:30:00",
+    "source": "yfinance",
+    "error": null
+  }
+}
+```
+
+### Analysis Last Date Endpoint
+
+Get the timestamp of the most recent training run for each symbol:
+
+```bash
+# macOS / Linux
+curl 'http://127.0.0.1:8420/api/analysis/last?symbols=AAPL,NVDA'
+
+# Windows PowerShell
+Invoke-RestMethod -Uri 'http://127.0.0.1:8420/api/analysis/last?symbols=AAPL,NVDA'
+```
+
+Response:
+```json
+{
+  "AAPL": {
+    "last_analysis_at": "2026-02-14T15:30:00Z",
+    "run_id": "run_20260214_153000",
+    "model_type": "lstm",
+    "status": "completed"
+  },
+  "NVDA": {
+    "last_analysis_at": null,
+    "run_id": null
+  }
+}
+```
+
+### Analysis Detail Endpoint
+
+Get detailed analysis artifacts for a symbol:
+
+```bash
+# macOS / Linux
+curl 'http://127.0.0.1:8420/api/analysis/detail/AAPL'
+
+# Windows PowerShell
+Invoke-RestMethod -Uri 'http://127.0.0.1:8420/api/analysis/detail/AAPL'
+```
+
+Response:
+```json
+{
+  "symbol": "AAPL",
+  "last_analysis_at": "2026-02-14T15:30:00Z",
+  "run_id": "run_20260214_153000",
+  "model_type": "lstm",
+  "status": "completed",
+  "artifacts": [
+    {"type": "dl_training", "title": "Deep Learning (LSTM) Summary", "data": {...}},
+    {"type": "metrics", "title": "Model Metrics", "data": {...}},
+    {"type": "data_quality", "title": "Data Quality", "data": {...}}
+  ]
+}
+```
+
+### Smoke Test
+
+```bash
+# macOS / Linux
+./scripts/smoke_metadata_analysis.sh
+
+# Quick test (fewer symbols)
+./scripts/smoke_metadata_analysis.sh --quick
 ```

@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+requests
+httpx
+PyYAML
+pydantic
+pydantic-settings
+rich
+click
+python-dotenv
+numpy
+pandas
+yfinance
+psutil
+apscheduler
+torch
+scikit-learn

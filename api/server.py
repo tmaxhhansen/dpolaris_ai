@@ -1040,6 +1040,7 @@ def _public_scan_job(job: dict[str, Any]) -> dict[str, Any]:
             "count": len(errors),
             "tickers": sorted(list(errors.keys()))[:20],
         },
+        "tickerStatus": job.get("ticker_status") or {},
         "logs": (job.get("logs") or [])[-200:],
     }
 
@@ -3675,8 +3676,17 @@ async def start_scan(request: ScanStartRequest):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Check for tickers filter - can be in request.tickers or strategy_universe_config.tickers
+    ticker_filter: Optional[list[str]] = None
     if request.tickers:
-        wanted = {_sanitize_symbol(x) for x in request.tickers}
+        ticker_filter = list(request.tickers)
+    elif request.strategy_universe_config and request.strategy_universe_config.get("tickers"):
+        raw_tickers = request.strategy_universe_config.get("tickers")
+        if isinstance(raw_tickers, list):
+            ticker_filter = [str(t) for t in raw_tickers]
+
+    if ticker_filter:
+        wanted = {_sanitize_symbol(x) for x in ticker_filter}
         wanted = {x for x in wanted if x}
         if wanted:
             universe_rows = [row for row in universe_rows if row.get("symbol") in wanted]
@@ -4321,6 +4331,108 @@ async def deep_learning_predict(symbol: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class DeepLearningRunRequest(BaseModel):
+    tickers: list[str]
+    fetch_data: bool = True
+    train_if_missing: bool = True
+    model_type: str = "lstm"
+    epochs: int = 50
+
+
+@app.post("/deep-learning/run")
+@app.post("/api/deep-learning/run")
+@app.post("/dl/run")
+async def run_deep_learning(request: DeepLearningRunRequest):
+    """
+    Run deep learning on selected tickers.
+    Fetches data from yfinance, trains models if missing, and returns predictions.
+    """
+    from ml.deep_learning import DeepLearningTrainer
+    from tools.market_data import MarketDataService
+
+    results = {}
+    errors = {}
+    trainer = DeepLearningTrainer()
+    market = market_service or MarketDataService()
+
+    for ticker in request.tickers:
+        symbol = ticker.strip().upper()
+        if not symbol:
+            continue
+
+        try:
+            logger.info("Processing deep learning for %s", symbol)
+
+            # Fetch historical data
+            df = await market.get_historical(
+                symbol,
+                days=int(os.getenv("DPOLARIS_DL_TRAINING_DAYS", "730")),
+            )
+            if df is None or len(df) < 200:
+                errors[symbol] = f"Not enough historical data for {symbol} (got {len(df) if df is not None else 0} rows)"
+                continue
+
+            # Try to load existing model, or train new one
+            model = None
+            scaler = None
+            metadata = {}
+
+            try:
+                model, scaler, metadata = trainer.load_model(symbol)
+                logger.info("Loaded existing model for %s", symbol)
+            except (FileNotFoundError, Exception) as load_err:
+                if request.train_if_missing:
+                    logger.info("Training new model for %s (load error: %s)", symbol, load_err)
+                    try:
+                        train_result = trainer.train_full_pipeline(
+                            df,
+                            model_name=symbol,
+                            model_type=request.model_type,
+                            epochs=request.epochs,
+                        )
+                        model, scaler, metadata = trainer.load_model(symbol)
+                        logger.info("Trained new model for %s", symbol)
+                    except Exception as train_err:
+                        errors[symbol] = f"Training failed: {train_err}"
+                        continue
+                else:
+                    errors[symbol] = f"No trained model for {symbol}"
+                    continue
+
+            # Make prediction
+            try:
+                prediction = trainer.predict(
+                    model,
+                    scaler,
+                    df,
+                    probability_calibration=metadata.get("metrics", {}).get("probability_calibration"),
+                )
+                results[symbol] = {
+                    "prediction": prediction.get("prediction_label", "UNKNOWN"),
+                    "confidence": prediction.get("confidence", 0.5),
+                    "probability_up": prediction.get("probability_up", 0.5),
+                    "probability_down": prediction.get("probability_down", 0.5),
+                    "model_type": metadata.get("model_type", request.model_type),
+                    "model_accuracy": metadata.get("metrics", {}).get("accuracy"),
+                    "status": "success",
+                }
+            except Exception as pred_err:
+                errors[symbol] = f"Prediction failed: {pred_err}"
+
+        except Exception as e:
+            errors[symbol] = str(e)
+            logger.exception("Error processing %s", symbol)
+
+    return {
+        "status": "completed",
+        "total_requested": len(request.tickers),
+        "successful": len(results),
+        "failed": len(errors),
+        "results": results,
+        "errors": errors,
+    }
+
+
 def _predict_symbol_direction(symbol: str, df) -> dict:
     deep_learning_error: Optional[str] = None
 
@@ -4838,6 +4950,307 @@ async def get_cloud_sentiment(symbols: Optional[str] = None, limit: int = 50):
 
     except Exception as e:
         return {"sentiment": [], "error": str(e)}
+
+
+# ==================== Stock Metadata + Analysis History for Java App ====================
+
+# In-memory cache for stock metadata (60-second TTL)
+_stock_metadata_cache: dict[str, dict[str, Any]] = {}
+_stock_metadata_cache_expiry: dict[str, float] = {}
+STOCK_METADATA_CACHE_TTL_SECONDS = 60
+
+
+def _yfinance_dependency_detail() -> dict[str, Any]:
+    return {
+        "error": "missing_dependency",
+        "dependency": "yfinance",
+        "install": "pip install yfinance",
+        "message": "yfinance is required for stock metadata endpoints.",
+    }
+
+
+def _require_yfinance() -> None:
+    """Raise HTTPException 503 if yfinance is not available."""
+    try:
+        import yfinance  # noqa: F401
+    except ImportError:
+        raise HTTPException(status_code=503, detail=_yfinance_dependency_detail())
+
+
+def _fetch_single_stock_metadata(symbol: str) -> dict[str, Any]:
+    """Fetch metadata for a single stock from yfinance (blocking call)."""
+    import time
+    import yfinance as yf
+
+    now = time.time()
+
+    # Check cache
+    cache_key = symbol.upper()
+    if cache_key in _stock_metadata_cache:
+        expiry = _stock_metadata_cache_expiry.get(cache_key, 0)
+        if now < expiry:
+            return _stock_metadata_cache[cache_key]
+
+    result: dict[str, Any] = {
+        "symbol": symbol.upper(),
+        "name": None,
+        "sector": None,
+        "market_cap": None,
+        "avg_volume_7d": None,
+        "change_percent_1d": None,
+        "as_of": datetime.utcnow().isoformat(),
+        "source": "yfinance",
+        "error": None,
+    }
+
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info or {}
+
+        result["name"] = info.get("shortName") or info.get("longName")
+        result["sector"] = info.get("sector")
+        result["market_cap"] = info.get("marketCap")
+
+        # Calculate change percent from previous close
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+        if current_price is not None and prev_close is not None and prev_close > 0:
+            result["change_percent_1d"] = round(((current_price - prev_close) / prev_close) * 100, 4)
+
+        # 7-day average volume: fetch last 10 days of history and average the last 7
+        avg_vol = info.get("averageVolume")
+        if avg_vol is not None:
+            result["avg_volume_7d"] = avg_vol
+        else:
+            try:
+                hist = ticker.history(period="10d")
+                if hist is not None and not hist.empty and "Volume" in hist.columns:
+                    recent_vol = hist["Volume"].tail(7)
+                    if len(recent_vol) > 0:
+                        result["avg_volume_7d"] = int(recent_vol.mean())
+            except Exception:
+                pass
+
+    except Exception as exc:
+        result["error"] = str(exc)
+
+    # Update cache
+    _stock_metadata_cache[cache_key] = result
+    _stock_metadata_cache_expiry[cache_key] = now + STOCK_METADATA_CACHE_TTL_SECONDS
+
+    return result
+
+
+@app.get("/api/stocks/metadata")
+async def get_stocks_metadata(symbols: str = Query(..., min_length=1, description="Comma-separated stock symbols")):
+    """
+    Get stock metadata for multiple symbols.
+
+    Returns sector, market cap, 7-day average volume, and 1-day change percent.
+    Uses yfinance as data source with 60-second in-memory cache.
+    """
+    _require_yfinance()
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not symbol_list:
+        raise HTTPException(status_code=400, detail={"error": "invalid_symbols", "message": "No valid symbols provided"})
+
+    # Limit to 50 symbols per request
+    if len(symbol_list) > 50:
+        symbol_list = symbol_list[:50]
+
+    # Fetch metadata (run in thread pool to avoid blocking)
+    loop = asyncio.get_event_loop()
+    results: dict[str, dict[str, Any]] = {}
+
+    for sym in symbol_list:
+        try:
+            meta = await loop.run_in_executor(None, _fetch_single_stock_metadata, sym)
+            results[sym] = meta
+        except Exception as exc:
+            results[sym] = {
+                "symbol": sym,
+                "name": None,
+                "sector": None,
+                "market_cap": None,
+                "avg_volume_7d": None,
+                "change_percent_1d": None,
+                "as_of": datetime.utcnow().isoformat(),
+                "source": "yfinance",
+                "error": str(exc),
+            }
+
+    return results
+
+
+def _find_latest_analysis_for_symbol(symbol: str) -> Optional[dict[str, Any]]:
+    """Find the most recent training run artifact for a given symbol."""
+    if list_training_runs is None:
+        return None
+
+    symbol_upper = symbol.upper()
+
+    try:
+        runs = list_training_runs(limit=500)
+        for run in runs:
+            tickers = run.get("tickers") or []
+            # Check if this run includes the symbol
+            if symbol_upper in [t.upper() for t in tickers]:
+                return {
+                    "last_analysis_at": run.get("completed_at") or run.get("created_at"),
+                    "run_id": run.get("run_id"),
+                    "model_type": run.get("model_type"),
+                    "status": run.get("status"),
+                }
+    except Exception:
+        pass
+
+    return None
+
+
+@app.get("/api/analysis/last")
+async def get_analysis_last(symbols: str = Query(..., min_length=1, description="Comma-separated stock symbols")):
+    """
+    Get the last analysis date for multiple symbols.
+
+    Returns the timestamp of the most recent successful training run artifact
+    that included each symbol.
+    """
+    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not symbol_list:
+        raise HTTPException(status_code=400, detail={"error": "invalid_symbols", "message": "No valid symbols provided"})
+
+    if len(symbol_list) > 100:
+        symbol_list = symbol_list[:100]
+
+    results: dict[str, Optional[dict[str, Any]]] = {}
+
+    for sym in symbol_list:
+        analysis_info = _find_latest_analysis_for_symbol(sym)
+        if analysis_info:
+            results[sym] = analysis_info
+        else:
+            results[sym] = {"last_analysis_at": None, "run_id": None}
+
+    return results
+
+
+def _build_analysis_artifacts(symbol: str, run_id: str) -> list[dict[str, Any]]:
+    """Build a list of analysis artifacts for a symbol from a training run."""
+    artifacts: list[dict[str, Any]] = []
+
+    if load_training_artifact is None or list_run_artifact_files is None:
+        return artifacts
+
+    try:
+        artifact_data = load_training_artifact(run_id)
+    except FileNotFoundError:
+        return artifacts
+    except Exception:
+        return artifacts
+
+    # Add run_summary as "dl_training" artifact
+    run_summary = artifact_data.get("run_summary", {})
+    if run_summary:
+        artifacts.append({
+            "type": "dl_training",
+            "title": f"Deep Learning ({run_summary.get('model_type', 'LSTM').upper()}) Summary",
+            "data": {
+                "run_id": run_summary.get("run_id"),
+                "status": run_summary.get("status"),
+                "model_type": run_summary.get("model_type"),
+                "target": run_summary.get("target"),
+                "horizon": run_summary.get("horizon"),
+                "created_at": run_summary.get("created_at"),
+                "completed_at": run_summary.get("completed_at"),
+                "duration_seconds": run_summary.get("duration_seconds"),
+                "tickers": run_summary.get("tickers"),
+            },
+        })
+
+    # Add metrics_summary as "metrics" artifact
+    metrics = artifact_data.get("metrics_summary", {})
+    if metrics:
+        artifacts.append({
+            "type": "metrics",
+            "title": "Model Metrics",
+            "data": metrics,
+        })
+
+    # Add data_summary as "data_quality" artifact
+    data_summary = artifact_data.get("data_summary", {})
+    if data_summary:
+        artifacts.append({
+            "type": "data_quality",
+            "title": "Data Quality",
+            "data": data_summary,
+        })
+
+    # Add feature_summary as "features" artifact
+    feature_summary = artifact_data.get("feature_summary", {})
+    if feature_summary:
+        artifacts.append({
+            "type": "features",
+            "title": "Feature Engineering",
+            "data": feature_summary,
+        })
+
+    # Add reproducibility_summary if present
+    repro = artifact_data.get("reproducibility_summary", {})
+    if repro:
+        artifacts.append({
+            "type": "reproducibility",
+            "title": "Reproducibility",
+            "data": repro,
+        })
+
+    # Add model_summary if present
+    model_summary = artifact_data.get("model_summary", {})
+    if model_summary:
+        artifacts.append({
+            "type": "model",
+            "title": "Model Architecture",
+            "data": model_summary,
+        })
+
+    return artifacts
+
+
+@app.get("/api/analysis/detail/{symbol}")
+async def get_analysis_detail(symbol: str):
+    """
+    Get detailed analysis for a symbol.
+
+    Returns structured JSON with all available artifacts from the most recent
+    training run that included this symbol. Works without LLM provider.
+    """
+    symbol_upper = symbol.strip().upper()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail={"error": "invalid_symbol", "message": "Symbol is required"})
+
+    # Find the latest analysis for this symbol
+    analysis_info = _find_latest_analysis_for_symbol(symbol_upper)
+
+    if not analysis_info or not analysis_info.get("run_id"):
+        return {
+            "symbol": symbol_upper,
+            "last_analysis_at": None,
+            "run_id": None,
+            "artifacts": [],
+            "message": "No analysis found for this symbol",
+        }
+
+    run_id = analysis_info["run_id"]
+    artifacts = _build_analysis_artifacts(symbol_upper, run_id)
+
+    return {
+        "symbol": symbol_upper,
+        "last_analysis_at": analysis_info.get("last_analysis_at"),
+        "run_id": run_id,
+        "model_type": analysis_info.get("model_type"),
+        "status": analysis_info.get("status"),
+        "artifacts": artifacts,
+    }
 
 
 # ==================== WebSocket Endpoints ====================
