@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 from collections import Counter
@@ -35,6 +36,13 @@ from core.memory import DPolarisMemory
 from core.ai import DPolarisAI
 from core.llm_provider import LLMUnavailableError
 from tools.market_data import MarketDataService, get_market_overview
+from daemon.backend_control import (
+    BackendControlConfig,
+    BackendControlManager,
+    BackendControlError,
+    PortInUseByUnknownProcessError,
+    UnsafeForceKillError,
+)
 
 try:
     from monitoring.drift import SelfCritiqueLogger
@@ -91,6 +99,8 @@ scan_job_order: list[str] = []
 scan_job_queue: Optional[asyncio.Queue[str]] = None
 scan_job_worker_task: Optional[asyncio.Task] = None
 server_started_at: Optional[datetime] = None
+backend_control_manager: Optional[BackendControlManager] = None
+backend_heartbeat_task: Optional[asyncio.Task] = None
 
 SUPPORTED_DL_MODELS = {"lstm", "transformer"}
 MAX_TRAINING_JOBS = 200
@@ -102,7 +112,7 @@ SCAN_INDEX_FILE = "scan_results_index.json"
 SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
-KNOWN_UNIVERSE_NAMES = {"nasdaq_top_500", "wsb_top_500", "combined_1000"}
+KNOWN_UNIVERSE_NAMES = {"nasdaq_top500", "wsb_top500", "combined_1000"}
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
     "AMD", "INTC", "ADBE", "CSCO", "PEP", "QCOM", "TXN", "AMAT", "INTU", "BKNG",
@@ -326,6 +336,71 @@ def _orchestrator_runtime_status(
     }
 
 
+def _resolve_backend_bind_host_port() -> tuple[str, int]:
+    host = os.getenv("DPOLARIS_BACKEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    raw_port = os.getenv("DPOLARIS_BACKEND_PORT", "8420").strip()
+    try:
+        port = int(raw_port)
+    except Exception:
+        port = 8420
+    return host, port
+
+
+def _ensure_backend_control_manager() -> BackendControlManager:
+    global backend_control_manager
+    if backend_control_manager is not None:
+        return backend_control_manager
+
+    cfg = config or get_config()
+    host, port = _resolve_backend_bind_host_port()
+    backend_control_manager = BackendControlManager(
+        BackendControlConfig(
+            host=host,
+            port=port,
+            data_dir=cfg.data_dir,
+            python_executable=Path(sys.executable).resolve(),
+            workdir=Path(__file__).resolve().parent.parent,
+        )
+    )
+    return backend_control_manager
+
+
+def _control_error_payload(exc: Exception) -> tuple[int, dict[str, Any]]:
+    if isinstance(exc, PortInUseByUnknownProcessError):
+        payload = exc.as_dict()
+        payload["force_supported"] = True
+        return 409, payload
+    if isinstance(exc, UnsafeForceKillError):
+        payload = exc.as_dict()
+        payload["force_supported"] = True
+        return 409, payload
+    if isinstance(exc, BackendControlError):
+        return 500, exc.as_dict()
+    return 500, {
+        "error": "backend_control_exception",
+        "message": str(exc),
+        "details": {},
+    }
+
+
+async def _backend_heartbeat_worker() -> None:
+    while True:
+        manager = _ensure_backend_control_manager()
+        try:
+            manager.touch_current_process_heartbeat(started_at=server_started_at, healthy=True)
+        except Exception as exc:
+            logger.warning("Failed to update backend heartbeat: %s", exc)
+        await asyncio.sleep(3)
+
+
+async def _signal_current_process_later(sig: int = signal.SIGTERM, delay_seconds: float = 0.25) -> None:
+    await asyncio.sleep(max(0.05, float(delay_seconds)))
+    try:
+        os.kill(os.getpid(), int(sig))
+    except Exception as exc:
+        logger.warning("Failed to signal current process: %s", exc)
+
+
 def _public_training_job(job: dict) -> dict:
     return {
         "id": job["id"],
@@ -375,6 +450,54 @@ def _scheduler_dependency_detail() -> dict[str, str]:
         "dependency": "apscheduler",
         "install": "pip install apscheduler",
     }
+
+
+def _torch_dependency_detail() -> dict[str, Any]:
+    return {
+        "error": "missing_dependency",
+        "dependency": "torch",
+        "install": "pip install torch torchvision",
+        "message": "PyTorch is required for deep-learning endpoints.",
+    }
+
+
+def _sklearn_dependency_detail() -> dict[str, Any]:
+    return {
+        "error": "missing_dependency",
+        "dependency": "scikit-learn",
+        "install": "pip install scikit-learn",
+        "message": "scikit-learn is required for ML endpoints.",
+    }
+
+
+def _require_torch() -> None:
+    """Raise HTTPException 503 if torch is not available."""
+    try:
+        import torch  # type: ignore # noqa: F401
+    except ImportError:
+        raise HTTPException(status_code=503, detail=_torch_dependency_detail())
+    except Exception as exc:
+        detail = _torch_dependency_detail()
+        detail["message"] = f"PyTorch import failed: {exc}"
+        raise HTTPException(status_code=503, detail=detail)
+
+
+def _require_sklearn() -> None:
+    """Raise HTTPException 503 if sklearn is not available."""
+    try:
+        from sklearn.preprocessing import StandardScaler  # noqa: F401
+    except ImportError:
+        raise HTTPException(status_code=503, detail=_sklearn_dependency_detail())
+    except Exception as exc:
+        detail = _sklearn_dependency_detail()
+        detail["message"] = f"scikit-learn import failed: {exc}"
+        raise HTTPException(status_code=503, detail=detail)
+
+
+def _require_deep_learning() -> None:
+    """Raise HTTPException 503 if deep-learning deps are missing."""
+    _require_torch()
+    _require_sklearn()
 
 
 def _is_apscheduler_missing(exc: Exception) -> bool:
@@ -2389,7 +2512,7 @@ async def lifespan(app: FastAPI):
     global config, db, memory, ai, market_service, self_critique_logger
     global training_jobs, training_job_order, training_job_queue, training_job_worker_task
     global scan_jobs, scan_job_order, scan_job_queue, scan_job_worker_task
-    global server_started_at
+    global server_started_at, backend_control_manager, backend_heartbeat_task
 
     # Startup
     logger.info("Starting dPolaris API...")
@@ -2409,6 +2532,9 @@ async def lifespan(app: FastAPI):
     scan_job_queue = asyncio.Queue()
     scan_job_worker_task = asyncio.create_task(_scan_job_worker())
     server_started_at = datetime.utcnow()
+    backend_control_manager = _ensure_backend_control_manager()
+    backend_control_manager.touch_current_process_heartbeat(started_at=server_started_at, healthy=True)
+    backend_heartbeat_task = asyncio.create_task(_backend_heartbeat_worker())
     logger.info("dPolaris API started")
 
     yield
@@ -2431,6 +2557,18 @@ async def lifespan(app: FastAPI):
             pass
         scan_job_worker_task = None
     scan_job_queue = None
+
+    if backend_heartbeat_task is not None:
+        backend_heartbeat_task.cancel()
+        try:
+            await backend_heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        backend_heartbeat_task = None
+
+    if backend_control_manager is not None:
+        backend_control_manager.clear_current_process_runtime_files()
+        backend_control_manager = None
 
     server_started_at = None
     self_critique_logger = None
@@ -2551,6 +2689,10 @@ class ScanStartRequest(BaseModel):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    try:
+        _ensure_backend_control_manager().touch_current_process_heartbeat(started_at=server_started_at, healthy=True)
+    except Exception:
+        pass
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
@@ -2853,6 +2995,30 @@ async def get_ai_status():
     ]
     last_activity = max(all_activity_times).isoformat() if all_activity_times else None
 
+    # Device summary for deep learning
+    device_summary: dict[str, Any] = {
+        "device": "unknown",
+        "torch_available": False,
+        "sklearn_available": False,
+        "deep_learning_ready": False,
+    }
+    try:
+        from ml.device import get_device_info, get_dependency_status
+
+        device_info = get_device_info()
+        dep_status = get_dependency_status()
+        device_summary = {
+            "device": device_info.get("device", "cpu"),
+            "reason": device_info.get("reason"),
+            "torch_available": dep_status.get("torch_available", False),
+            "sklearn_available": dep_status.get("sklearn_available", False),
+            "deep_learning_ready": dep_status.get("deep_learning_ready", False),
+            "cuda_available": device_info.get("cuda_available", False),
+            "mps_available": device_info.get("mps_available", False),
+        }
+    except Exception:
+        pass
+
     return {
         "daemon_running": daemon_running,
         "scheduler_available": scheduler_available,
@@ -2866,6 +3032,257 @@ async def get_ai_status():
         "llm_detail": None if (ai and ai.llm_enabled) else _llm_disabled_detail()["detail"],
         "uptime": _format_uptime(server_started_at),
         "win_rate": win_rate,
+        "device_summary": device_summary,
+    }
+
+
+@app.get("/api/control/backend/status")
+async def control_backend_status():
+    """Get managed backend process status for external control-center clients."""
+    manager = _ensure_backend_control_manager()
+    status = manager.get_status(include_health_check=True)
+    status["status"] = "ok"
+    return status
+
+
+@app.post("/api/control/backend/start")
+async def control_backend_start(force: bool = Query(False)):
+    """Start managed backend process if not already running."""
+    manager = _ensure_backend_control_manager()
+    try:
+        return manager.start_backend(force=bool(force), wait_for_health_seconds=25)
+    except Exception as exc:
+        status_code, payload = _control_error_payload(exc)
+        raise HTTPException(status_code=status_code, detail=payload)
+
+
+@app.post("/api/control/backend/stop")
+async def control_backend_stop(force: bool = Query(False)):
+    """Stop managed backend process."""
+    manager = _ensure_backend_control_manager()
+    try:
+        result = manager.stop_backend(force=bool(force))
+    except Exception as exc:
+        status_code, payload = _control_error_payload(exc)
+        raise HTTPException(status_code=status_code, detail=payload)
+
+    if result.get("status") == "self_stop_required":
+        result["status"] = "stopping"
+        result["self_stop"] = True
+        asyncio.create_task(_signal_current_process_later(signal.SIGTERM, 0.3))
+        return result
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("error") or result)
+
+    return result
+
+
+@app.post("/api/control/backend/restart")
+async def control_backend_restart(force: bool = Query(False)):
+    """Restart managed backend process."""
+    manager = _ensure_backend_control_manager()
+    try:
+        result = manager.restart_backend(force=bool(force), wait_for_health_seconds=25)
+    except Exception as exc:
+        status_code, payload = _control_error_payload(exc)
+        raise HTTPException(status_code=status_code, detail=payload)
+
+    if result.get("status") == "self_stop_required":
+        helper_pid = manager.spawn_restart_helper(old_pid=os.getpid(), force=bool(force))
+        restarting = {
+            "status": "restarting",
+            "helper_pid": helper_pid,
+            "backend": manager.get_status(include_health_check=False),
+        }
+        asyncio.create_task(_signal_current_process_later(signal.SIGTERM, 0.35))
+        return restarting
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("error") or result)
+
+    return result
+
+
+@app.get("/api/control/orchestrator/status")
+async def control_orchestrator_status():
+    """Control-center orchestrator status surface."""
+    cfg = config or get_config()
+    return _orchestrator_runtime_status(
+        data_dir=cfg.data_dir,
+        default_host="127.0.0.1",
+        default_port=8420,
+        heartbeat_stale_seconds=180,
+    )
+
+
+@app.post("/api/control/orchestrator/start")
+async def control_orchestrator_start(
+    force: bool = Query(False),
+    dry_run: bool = Query(False),
+    interval_health: int = Query(60, ge=5, le=3600),
+    interval_scan: str = Query("30m"),
+):
+    """Start orchestrator process for dPolaris_ops integration."""
+    cfg = config or get_config()
+    runtime = _orchestrator_runtime_status(
+        data_dir=cfg.data_dir,
+        default_host="127.0.0.1",
+        default_port=8420,
+        heartbeat_stale_seconds=180,
+    )
+    if runtime.get("running"):
+        return {"status": "already_running", "orchestrator": runtime}
+
+    run_dir = cfg.data_dir / "run"
+    pid_path = run_dir / "orchestrator.pid"
+    heartbeat_path = run_dir / "orchestrator.heartbeat.json"
+    if runtime.get("pid") and not _is_pid_alive(int(runtime["pid"])):
+        try:
+            if pid_path.exists():
+                pid_path.unlink()
+        except Exception:
+            pass
+        try:
+            if heartbeat_path.exists():
+                heartbeat_path.unlink()
+        except Exception:
+            pass
+
+    if runtime.get("port_owner_unknown") and not force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "backend_port_owned_by_unmanaged_process",
+                "message": "Backend port is currently owned by a non-managed process.",
+                "details": runtime.get("backend_state", {}),
+            },
+        )
+
+    cmd = [
+        str(Path(sys.executable).resolve()),
+        "-m",
+        "cli.main",
+        "orchestrator",
+        "--host",
+        str(runtime.get("host") or "127.0.0.1"),
+        "--port",
+        str(int(runtime.get("port") or 8420)),
+        "--interval-health",
+        str(int(interval_health)),
+        "--interval-scan",
+        str(interval_scan),
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+
+    logs_dir = cfg.data_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d")
+    log_path = logs_dir / f"orchestrator-control-{stamp}.log"
+    with open(log_path, "a", encoding="utf-8") as log_handle:
+        kwargs: dict[str, Any] = {
+            "cwd": str(Path(__file__).resolve().parent.parent),
+            "env": os.environ.copy(),
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+        }
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            kwargs["creationflags"] = creationflags
+        else:
+            kwargs["start_new_session"] = True
+        proc = subprocess.Popen(cmd, **kwargs)
+
+    for _ in range(20):
+        await asyncio.sleep(0.25)
+        runtime = _orchestrator_runtime_status(
+            data_dir=cfg.data_dir,
+            default_host="127.0.0.1",
+            default_port=8420,
+            heartbeat_stale_seconds=180,
+        )
+        if runtime.get("running") or runtime.get("pid") == proc.pid:
+            break
+
+    return {
+        "status": "started",
+        "pid": proc.pid,
+        "orchestrator": runtime,
+    }
+
+
+@app.post("/api/control/orchestrator/stop")
+async def control_orchestrator_stop(force: bool = Query(False)):
+    """Stop orchestrator process for dPolaris_ops integration."""
+    cfg = config or get_config()
+    runtime = _orchestrator_runtime_status(
+        data_dir=cfg.data_dir,
+        default_host="127.0.0.1",
+        default_port=8420,
+        heartbeat_stale_seconds=180,
+    )
+    pid = runtime.get("pid")
+    run_dir = cfg.data_dir / "run"
+    pid_path = run_dir / "orchestrator.pid"
+    heartbeat_path = run_dir / "orchestrator.heartbeat.json"
+
+    if not pid:
+        return {"status": "not_running", "orchestrator": runtime}
+
+    if not _is_pid_alive(int(pid)):
+        try:
+            if pid_path.exists():
+                pid_path.unlink()
+        except Exception:
+            pass
+        try:
+            if heartbeat_path.exists():
+                heartbeat_path.unlink()
+        except Exception:
+            pass
+        return {"status": "not_running", "orchestrator": _orchestrator_runtime_status(data_dir=cfg.data_dir)}
+
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": "stop_failed", "message": str(exc)})
+
+    for _ in range(30):
+        if not _is_pid_alive(int(pid)):
+            break
+        await asyncio.sleep(0.2)
+
+    if _is_pid_alive(int(pid)) and force:
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+
+    stopped = not _is_pid_alive(int(pid))
+    if stopped:
+        try:
+            if pid_path.exists():
+                pid_path.unlink()
+        except Exception:
+            pass
+        try:
+            if heartbeat_path.exists():
+                heartbeat_path.unlink()
+        except Exception:
+            pass
+
+    return {
+        "status": "stopped" if stopped else "error",
+        "orchestrator": _orchestrator_runtime_status(
+            data_dir=cfg.data_dir,
+            default_host="127.0.0.1",
+            default_port=8420,
+            heartbeat_stale_seconds=180,
+        ),
     }
 
 
@@ -3153,6 +3570,56 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 
     rows.sort(key=_sort_key, reverse=True)
     return rows[: max(1, int(limit))]
+
+
+def _list_available_universes() -> list[dict[str, Any]]:
+    """List all available universe files."""
+    universes: list[dict[str, Any]] = []
+    universe_dir = _repo_root() / "universe"
+
+    # Ensure default universes exist
+    for name in KNOWN_UNIVERSE_NAMES:
+        _ensure_default_universe_file(name)
+
+    if universe_dir.exists() and universe_dir.is_dir():
+        for path in sorted(universe_dir.glob("*.json")):
+            name = path.stem
+            payload = _json_load(path)
+            if payload is None:
+                continue
+
+            # Count tickers
+            ticker_count = 0
+            if isinstance(payload.get("merged"), list):
+                ticker_count = len(payload.get("merged"))
+            elif isinstance(payload.get("tickers"), list):
+                ticker_count = len(payload.get("tickers"))
+
+            universes.append({
+                "name": name,
+                "path": str(path),
+                "ticker_count": ticker_count,
+                "schema_version": payload.get("schema_version"),
+                "generated_at": payload.get("generated_at"),
+                "universe_hash": payload.get("universe_hash"),
+            })
+
+    return universes
+
+
+@app.get("/universe/list")
+@app.get("/api/universe/list")
+async def list_universes():
+    """
+    List all available universe definitions.
+
+    Returns JSON list of universe names and metadata.
+    """
+    universes = _list_available_universes()
+    return {
+        "universes": universes,
+        "count": len(universes),
+    }
 
 
 @app.get("/scan/universe")
@@ -3555,6 +4022,55 @@ async def get_dl_status():
         "deep_learning_enabled": deep_learning_enabled,
         "deep_learning_reason": deep_learning_reason,
     }
+
+
+@app.get("/api/deep-learning/device")
+async def get_dl_device():
+    """
+    Get detailed device information for deep-learning workloads.
+
+    Returns device selection info including:
+    - device: Selected device (cuda/mps/cpu)
+    - reason: Why this device was selected
+    - torch_version: PyTorch version
+    - cuda_available: Whether CUDA is available
+    - mps_available: Whether Apple MPS is available
+    - gpu_name: GPU name if CUDA available
+    """
+    try:
+        from ml.device import get_device_info, get_dependency_status
+
+        device_info = get_device_info()
+        dep_status = get_dependency_status()
+
+        return {
+            "device": device_info.get("device", "cpu"),
+            "reason": device_info.get("reason", "Unknown"),
+            "torch_version": device_info.get("torch_version"),
+            "cuda_available": device_info.get("cuda_available", False),
+            "mps_available": device_info.get("mps_available", False),
+            "gpu_name": device_info.get("gpu_name"),
+            "requested": device_info.get("requested", "auto"),
+            "warning": device_info.get("warning"),
+            "torch_importable": dep_status.get("torch_available", False),
+            "sklearn_importable": dep_status.get("sklearn_available", False),
+            "deep_learning_ready": dep_status.get("deep_learning_ready", False),
+        }
+    except ImportError:
+        # ml.device module not available - provide basic info
+        return {
+            "device": "cpu",
+            "reason": "ml.device module unavailable",
+            "torch_version": None,
+            "cuda_available": False,
+            "mps_available": False,
+            "gpu_name": None,
+            "requested": os.getenv("DPOLARIS_DEVICE", "auto"),
+            "warning": "Device detection unavailable",
+            "torch_importable": False,
+            "sklearn_importable": False,
+            "deep_learning_ready": False,
+        }
 
 
 @app.post("/api/jobs/deep-learning/train")
