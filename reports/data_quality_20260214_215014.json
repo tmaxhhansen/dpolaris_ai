@@ -1,0 +1,54 @@
+{
+  "run_id": "20260214_215014",
+  "generated_at": "2026-02-14T21:50:16.221924+00:00",
+  "symbol": "AAPL",
+  "interval": "1d",
+  "policy": {
+    "duplicate_policy": "drop",
+    "missing_timestamp_policy": "repair",
+    "negative_volume_policy": "repair",
+    "stale_price_policy": "drop",
+    "outlier_policy": "drop",
+    "stale_run_length": 10,
+    "outlier_return_threshold": 0.35,
+    "min_history_rows_multiplier": 80
+  },
+  "row_count_before": 2513,
+  "row_count_after": 2607,
+  "checks": {
+    "duplicates": {
+      "count": 0,
+      "action": "drop"
+    },
+    "missing_timestamps": {
+      "count": 94,
+      "action": "repair",
+      "repaired_count": 94,
+      "examples": [
+        "2016-03-25 00:00:00-04:00",
+        "2016-05-30 00:00:00-04:00",
+        "2016-07-04 00:00:00-04:00",
+        "2016-09-05 00:00:00-04:00",
+        "2016-11-24 00:00:00-05:00"
+      ]
+    },
+    "negative_volume": {
+      "count": 0,
+      "action": "repair"
+    },
+    "stale_prices": {
+      "count": 0,
+      "action": "drop"
+    },
+    "outliers_without_corporate_action": {
+      "count": 0,
+      "action": "drop",
+      "threshold_abs_return": 0.35
+    },
+    "minimum_history": {
+      "required_rows": 400,
+      "actual_rows": 2607,
+      "passed": true
+    }
+  }
+}

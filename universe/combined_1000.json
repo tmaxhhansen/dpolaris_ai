@@ -1,0 +1,1579 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-02-14T22:08:55.832293+00:00",
+  "criteria": {
+    "top_n_requested": 1000,
+    "top_n_returned": 50,
+    "duplicate_resolution": "merge_on_symbol"
+  },
+  "data_sources": [
+    {
+      "name": "nasdaq_top_500",
+      "count": 50
+    },
+    {
+      "name": "wsb_top_500",
+      "count": 50
+    }
+  ],
+  "notes": [
+    "Fallback combined universe generated in API runtime due missing universe files."
+  ],
+  "nasdaq_top_500": [
+    {
+      "symbol": "AAPL",
+      "company_name": "AAPL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MSFT",
+      "company_name": "MSFT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "NVDA",
+      "company_name": "NVDA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMZN",
+      "company_name": "AMZN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "GOOGL",
+      "company_name": "GOOGL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "META",
+      "company_name": "META",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "TSLA",
+      "company_name": "TSLA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AVGO",
+      "company_name": "AVGO",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "COST",
+      "company_name": "COST",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "NFLX",
+      "company_name": "NFLX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMD",
+      "company_name": "AMD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "INTC",
+      "company_name": "INTC",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ADBE",
+      "company_name": "ADBE",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CSCO",
+      "company_name": "CSCO",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PEP",
+      "company_name": "PEP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "QCOM",
+      "company_name": "QCOM",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "TXN",
+      "company_name": "TXN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMAT",
+      "company_name": "AMAT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "INTU",
+      "company_name": "INTU",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "BKNG",
+      "company_name": "BKNG",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MU",
+      "company_name": "MU",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "LRCX",
+      "company_name": "LRCX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ADI",
+      "company_name": "ADI",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PANW",
+      "company_name": "PANW",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "KLAC",
+      "company_name": "KLAC",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CRWD",
+      "company_name": "CRWD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MELI",
+      "company_name": "MELI",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MAR",
+      "company_name": "MAR",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MDLZ",
+      "company_name": "MDLZ",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ADP",
+      "company_name": "ADP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "SBUX",
+      "company_name": "SBUX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMGN",
+      "company_name": "AMGN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ISRG",
+      "company_name": "ISRG",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PYPL",
+      "company_name": "PYPL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "GILD",
+      "company_name": "GILD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "REGN",
+      "company_name": "REGN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "VRTX",
+      "company_name": "VRTX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ABNB",
+      "company_name": "ABNB",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "DASH",
+      "company_name": "DASH",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "SNPS",
+      "company_name": "SNPS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CDNS",
+      "company_name": "CDNS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "FTNT",
+      "company_name": "FTNT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ORLY",
+      "company_name": "ORLY",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CTAS",
+      "company_name": "CTAS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CSX",
+      "company_name": "CSX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ROP",
+      "company_name": "ROP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CMCSA",
+      "company_name": "CMCSA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "TMUS",
+      "company_name": "TMUS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PDD",
+      "company_name": "PDD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ASML",
+      "company_name": "ASML",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    }
+  ],
+  "wsb_top_500": [
+    {
+      "symbol": "AAPL",
+      "mention_count": 50,
+      "mention_velocity": 7.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MSFT",
+      "mention_count": 49,
+      "mention_velocity": 7.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "NVDA",
+      "mention_count": 48,
+      "mention_velocity": 6.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMZN",
+      "mention_count": 47,
+      "mention_velocity": 6.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "GOOGL",
+      "mention_count": 46,
+      "mention_velocity": 6.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "META",
+      "mention_count": 45,
+      "mention_velocity": 6.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "TSLA",
+      "mention_count": 44,
+      "mention_velocity": 6.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AVGO",
+      "mention_count": 43,
+      "mention_velocity": 6.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "COST",
+      "mention_count": 42,
+      "mention_velocity": 6.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "NFLX",
+      "mention_count": 41,
+      "mention_velocity": 5.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMD",
+      "mention_count": 40,
+      "mention_velocity": 5.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "INTC",
+      "mention_count": 39,
+      "mention_velocity": 5.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ADBE",
+      "mention_count": 38,
+      "mention_velocity": 5.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CSCO",
+      "mention_count": 37,
+      "mention_velocity": 5.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PEP",
+      "mention_count": 36,
+      "mention_velocity": 5.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "QCOM",
+      "mention_count": 35,
+      "mention_velocity": 5.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "TXN",
+      "mention_count": 34,
+      "mention_velocity": 4.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMAT",
+      "mention_count": 33,
+      "mention_velocity": 4.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "INTU",
+      "mention_count": 32,
+      "mention_velocity": 4.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "BKNG",
+      "mention_count": 31,
+      "mention_velocity": 4.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MU",
+      "mention_count": 30,
+      "mention_velocity": 4.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "LRCX",
+      "mention_count": 29,
+      "mention_velocity": 4.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ADI",
+      "mention_count": 28,
+      "mention_velocity": 4.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PANW",
+      "mention_count": 27,
+      "mention_velocity": 3.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "KLAC",
+      "mention_count": 26,
+      "mention_velocity": 3.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CRWD",
+      "mention_count": 25,
+      "mention_velocity": 3.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MELI",
+      "mention_count": 24,
+      "mention_velocity": 3.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MAR",
+      "mention_count": 23,
+      "mention_velocity": 3.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MDLZ",
+      "mention_count": 22,
+      "mention_velocity": 3.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ADP",
+      "mention_count": 21,
+      "mention_velocity": 3.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "SBUX",
+      "mention_count": 20,
+      "mention_velocity": 2.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMGN",
+      "mention_count": 19,
+      "mention_velocity": 2.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ISRG",
+      "mention_count": 18,
+      "mention_velocity": 2.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PYPL",
+      "mention_count": 17,
+      "mention_velocity": 2.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "GILD",
+      "mention_count": 16,
+      "mention_velocity": 2.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "REGN",
+      "mention_count": 15,
+      "mention_velocity": 2.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "VRTX",
+      "mention_count": 14,
+      "mention_velocity": 2.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ABNB",
+      "mention_count": 13,
+      "mention_velocity": 1.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "DASH",
+      "mention_count": 12,
+      "mention_velocity": 1.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "SNPS",
+      "mention_count": 11,
+      "mention_velocity": 1.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CDNS",
+      "mention_count": 10,
+      "mention_velocity": 1.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "FTNT",
+      "mention_count": 9,
+      "mention_velocity": 1.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ORLY",
+      "mention_count": 8,
+      "mention_velocity": 1.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CTAS",
+      "mention_count": 7,
+      "mention_velocity": 1.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CSX",
+      "mention_count": 6,
+      "mention_velocity": 0.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ROP",
+      "mention_count": 5,
+      "mention_velocity": 0.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CMCSA",
+      "mention_count": 4,
+      "mention_velocity": 0.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "TMUS",
+      "mention_count": 3,
+      "mention_velocity": 0.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PDD",
+      "mention_count": 2,
+      "mention_velocity": 0.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ASML",
+      "mention_count": 1,
+      "mention_velocity": 0.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    }
+  ],
+  "merged": [
+    {
+      "symbol": "AAPL",
+      "company_name": "AAPL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 50,
+      "mention_velocity": 7.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "company_name": "MSFT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 49,
+      "mention_velocity": 7.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "NVDA",
+      "company_name": "NVDA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 48,
+      "mention_velocity": 6.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "AMZN",
+      "company_name": "AMZN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 47,
+      "mention_velocity": 6.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "GOOGL",
+      "company_name": "GOOGL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 46,
+      "mention_velocity": 6.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "META",
+      "company_name": "META",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 45,
+      "mention_velocity": 6.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "TSLA",
+      "company_name": "TSLA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 44,
+      "mention_velocity": 6.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "AVGO",
+      "company_name": "AVGO",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 43,
+      "mention_velocity": 6.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "COST",
+      "company_name": "COST",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 42,
+      "mention_velocity": 6.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "NFLX",
+      "company_name": "NFLX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 41,
+      "mention_velocity": 5.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "AMD",
+      "company_name": "AMD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 40,
+      "mention_velocity": 5.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "INTC",
+      "company_name": "INTC",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 39,
+      "mention_velocity": 5.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ADBE",
+      "company_name": "ADBE",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 38,
+      "mention_velocity": 5.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "CSCO",
+      "company_name": "CSCO",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 37,
+      "mention_velocity": 5.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "PEP",
+      "company_name": "PEP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 36,
+      "mention_velocity": 5.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "QCOM",
+      "company_name": "QCOM",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 35,
+      "mention_velocity": 5.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "TXN",
+      "company_name": "TXN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 34,
+      "mention_velocity": 4.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "AMAT",
+      "company_name": "AMAT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 33,
+      "mention_velocity": 4.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "INTU",
+      "company_name": "INTU",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 32,
+      "mention_velocity": 4.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "BKNG",
+      "company_name": "BKNG",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 31,
+      "mention_velocity": 4.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "MU",
+      "company_name": "MU",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 30,
+      "mention_velocity": 4.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "LRCX",
+      "company_name": "LRCX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 29,
+      "mention_velocity": 4.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ADI",
+      "company_name": "ADI",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 28,
+      "mention_velocity": 4.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "PANW",
+      "company_name": "PANW",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 27,
+      "mention_velocity": 3.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "KLAC",
+      "company_name": "KLAC",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 26,
+      "mention_velocity": 3.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "CRWD",
+      "company_name": "CRWD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 25,
+      "mention_velocity": 3.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "MELI",
+      "company_name": "MELI",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 24,
+      "mention_velocity": 3.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "MAR",
+      "company_name": "MAR",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 23,
+      "mention_velocity": 3.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "MDLZ",
+      "company_name": "MDLZ",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 22,
+      "mention_velocity": 3.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ADP",
+      "company_name": "ADP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 21,
+      "mention_velocity": 3.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "SBUX",
+      "company_name": "SBUX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 20,
+      "mention_velocity": 2.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "AMGN",
+      "company_name": "AMGN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 19,
+      "mention_velocity": 2.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ISRG",
+      "company_name": "ISRG",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 18,
+      "mention_velocity": 2.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "PYPL",
+      "company_name": "PYPL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 17,
+      "mention_velocity": 2.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "GILD",
+      "company_name": "GILD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 16,
+      "mention_velocity": 2.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "REGN",
+      "company_name": "REGN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 15,
+      "mention_velocity": 2.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "VRTX",
+      "company_name": "VRTX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 14,
+      "mention_velocity": 2.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ABNB",
+      "company_name": "ABNB",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 13,
+      "mention_velocity": 1.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "DASH",
+      "company_name": "DASH",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 12,
+      "mention_velocity": 1.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "SNPS",
+      "company_name": "SNPS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 11,
+      "mention_velocity": 1.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "CDNS",
+      "company_name": "CDNS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 10,
+      "mention_velocity": 1.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "FTNT",
+      "company_name": "FTNT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 9,
+      "mention_velocity": 1.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ORLY",
+      "company_name": "ORLY",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 8,
+      "mention_velocity": 1.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "CTAS",
+      "company_name": "CTAS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 7,
+      "mention_velocity": 1.0,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "CSX",
+      "company_name": "CSX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 6,
+      "mention_velocity": 0.857143,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ROP",
+      "company_name": "ROP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 5,
+      "mention_velocity": 0.714286,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "CMCSA",
+      "company_name": "CMCSA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 4,
+      "mention_velocity": 0.571429,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "TMUS",
+      "company_name": "TMUS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 3,
+      "mention_velocity": 0.428571,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "PDD",
+      "company_name": "PDD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 2,
+      "mention_velocity": 0.285714,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    },
+    {
+      "symbol": "ASML",
+      "company_name": "ASML",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null,
+      "mention_count": 1,
+      "mention_velocity": 0.142857,
+      "sentiment_score": 0.0,
+      "sources": [
+        "nasdaq_top_500",
+        "wsb_top_500"
+      ]
+    }
+  ],
+  "universe_hash": "54b26c1a0fb73c35e9d47226ded5626583c7682c6392ba1fb783fe198c5ae622"
+}

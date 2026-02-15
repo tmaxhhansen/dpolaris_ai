@@ -1,0 +1,428 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-02-14T22:08:55.823863+00:00",
+  "window_start": "2026-02-07T22:08:55.823863+00:00",
+  "window_end": "2026-02-14T22:08:55.823863+00:00",
+  "criteria": {
+    "top_n_requested": 500,
+    "top_n_returned": 50,
+    "window_days": 7,
+    "dedupe": "fallback",
+    "ticker_linking": "fallback"
+  },
+  "source_connector": "fallback_mentions",
+  "data_sources": [
+    {
+      "name": "fallback_mentions",
+      "raw_posts": 0,
+      "deduped_posts": 0
+    }
+  ],
+  "notes": [
+    "Fallback WSB universe generated in API runtime due missing universe file.",
+    "Replace with scheduled universe build for real mention data."
+  ],
+  "tickers": [
+    {
+      "symbol": "AAPL",
+      "mention_count": 50,
+      "mention_velocity": 7.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MSFT",
+      "mention_count": 49,
+      "mention_velocity": 7.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "NVDA",
+      "mention_count": 48,
+      "mention_velocity": 6.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMZN",
+      "mention_count": 47,
+      "mention_velocity": 6.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "GOOGL",
+      "mention_count": 46,
+      "mention_velocity": 6.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "META",
+      "mention_count": 45,
+      "mention_velocity": 6.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "TSLA",
+      "mention_count": 44,
+      "mention_velocity": 6.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AVGO",
+      "mention_count": 43,
+      "mention_velocity": 6.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "COST",
+      "mention_count": 42,
+      "mention_velocity": 6.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "NFLX",
+      "mention_count": 41,
+      "mention_velocity": 5.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMD",
+      "mention_count": 40,
+      "mention_velocity": 5.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "INTC",
+      "mention_count": 39,
+      "mention_velocity": 5.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ADBE",
+      "mention_count": 38,
+      "mention_velocity": 5.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CSCO",
+      "mention_count": 37,
+      "mention_velocity": 5.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PEP",
+      "mention_count": 36,
+      "mention_velocity": 5.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "QCOM",
+      "mention_count": 35,
+      "mention_velocity": 5.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "TXN",
+      "mention_count": 34,
+      "mention_velocity": 4.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMAT",
+      "mention_count": 33,
+      "mention_velocity": 4.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "INTU",
+      "mention_count": 32,
+      "mention_velocity": 4.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "BKNG",
+      "mention_count": 31,
+      "mention_velocity": 4.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MU",
+      "mention_count": 30,
+      "mention_velocity": 4.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "LRCX",
+      "mention_count": 29,
+      "mention_velocity": 4.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ADI",
+      "mention_count": 28,
+      "mention_velocity": 4.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PANW",
+      "mention_count": 27,
+      "mention_velocity": 3.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "KLAC",
+      "mention_count": 26,
+      "mention_velocity": 3.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CRWD",
+      "mention_count": 25,
+      "mention_velocity": 3.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MELI",
+      "mention_count": 24,
+      "mention_velocity": 3.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MAR",
+      "mention_count": 23,
+      "mention_velocity": 3.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "MDLZ",
+      "mention_count": 22,
+      "mention_velocity": 3.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ADP",
+      "mention_count": 21,
+      "mention_velocity": 3.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "SBUX",
+      "mention_count": 20,
+      "mention_velocity": 2.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "AMGN",
+      "mention_count": 19,
+      "mention_velocity": 2.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ISRG",
+      "mention_count": 18,
+      "mention_velocity": 2.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PYPL",
+      "mention_count": 17,
+      "mention_velocity": 2.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "GILD",
+      "mention_count": 16,
+      "mention_velocity": 2.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "REGN",
+      "mention_count": 15,
+      "mention_velocity": 2.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "VRTX",
+      "mention_count": 14,
+      "mention_velocity": 2.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ABNB",
+      "mention_count": 13,
+      "mention_velocity": 1.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "DASH",
+      "mention_count": 12,
+      "mention_velocity": 1.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "SNPS",
+      "mention_count": 11,
+      "mention_velocity": 1.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CDNS",
+      "mention_count": 10,
+      "mention_velocity": 1.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "FTNT",
+      "mention_count": 9,
+      "mention_velocity": 1.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ORLY",
+      "mention_count": 8,
+      "mention_velocity": 1.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CTAS",
+      "mention_count": 7,
+      "mention_velocity": 1.0,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CSX",
+      "mention_count": 6,
+      "mention_velocity": 0.857143,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ROP",
+      "mention_count": 5,
+      "mention_velocity": 0.714286,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "CMCSA",
+      "mention_count": 4,
+      "mention_velocity": 0.571429,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "TMUS",
+      "mention_count": 3,
+      "mention_velocity": 0.428571,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "PDD",
+      "mention_count": 2,
+      "mention_velocity": 0.285714,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    },
+    {
+      "symbol": "ASML",
+      "mention_count": 1,
+      "mention_velocity": 0.142857,
+      "sentiment_score": 0.0,
+      "example_post_ids": [],
+      "example_titles": []
+    }
+  ],
+  "universe_hash": "cde884693e6c5d9332de11930bb57296c8d1ddff79af1682f4d9569f7390e567"
+}

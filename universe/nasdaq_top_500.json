@@ -1,0 +1,428 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-02-14T22:07:08.072097+00:00",
+  "criteria": {
+    "exchange": "NASDAQ",
+    "top_n_requested": 500,
+    "top_n_returned": 50,
+    "ranking": "fallback_symbol_list",
+    "liquidity_filter": {
+      "metric": "average_dollar_volume",
+      "min_avg_dollar_volume": 0.0
+    },
+    "candidate_limit": 50
+  },
+  "data_sources": [
+    {
+      "name": "fallback_symbol_list",
+      "notes": "generated because universe file was missing"
+    }
+  ],
+  "notes": [
+    "Fallback universe generated in API runtime due missing universe file.",
+    "Set DPOLARIS_FALLBACK_SYMBOLS for a custom symbol list."
+  ],
+  "tickers": [
+    {
+      "symbol": "AAPL",
+      "company_name": "AAPL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MSFT",
+      "company_name": "MSFT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "NVDA",
+      "company_name": "NVDA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMZN",
+      "company_name": "AMZN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "GOOGL",
+      "company_name": "GOOGL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "META",
+      "company_name": "META",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "TSLA",
+      "company_name": "TSLA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AVGO",
+      "company_name": "AVGO",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "COST",
+      "company_name": "COST",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "NFLX",
+      "company_name": "NFLX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMD",
+      "company_name": "AMD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "INTC",
+      "company_name": "INTC",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ADBE",
+      "company_name": "ADBE",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CSCO",
+      "company_name": "CSCO",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PEP",
+      "company_name": "PEP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "QCOM",
+      "company_name": "QCOM",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "TXN",
+      "company_name": "TXN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMAT",
+      "company_name": "AMAT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "INTU",
+      "company_name": "INTU",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "BKNG",
+      "company_name": "BKNG",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MU",
+      "company_name": "MU",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "LRCX",
+      "company_name": "LRCX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ADI",
+      "company_name": "ADI",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PANW",
+      "company_name": "PANW",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "KLAC",
+      "company_name": "KLAC",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CRWD",
+      "company_name": "CRWD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MELI",
+      "company_name": "MELI",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MAR",
+      "company_name": "MAR",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "MDLZ",
+      "company_name": "MDLZ",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ADP",
+      "company_name": "ADP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "SBUX",
+      "company_name": "SBUX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "AMGN",
+      "company_name": "AMGN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ISRG",
+      "company_name": "ISRG",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PYPL",
+      "company_name": "PYPL",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "GILD",
+      "company_name": "GILD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "REGN",
+      "company_name": "REGN",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "VRTX",
+      "company_name": "VRTX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ABNB",
+      "company_name": "ABNB",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "DASH",
+      "company_name": "DASH",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "SNPS",
+      "company_name": "SNPS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CDNS",
+      "company_name": "CDNS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "FTNT",
+      "company_name": "FTNT",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ORLY",
+      "company_name": "ORLY",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CTAS",
+      "company_name": "CTAS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CSX",
+      "company_name": "CSX",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ROP",
+      "company_name": "ROP",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "CMCSA",
+      "company_name": "CMCSA",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "TMUS",
+      "company_name": "TMUS",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "PDD",
+      "company_name": "PDD",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    },
+    {
+      "symbol": "ASML",
+      "company_name": "ASML",
+      "market_cap": null,
+      "avg_dollar_volume": null,
+      "sector": null,
+      "industry": null
+    }
+  ],
+  "universe_hash": "bd51d6992c8614d4e90430ed4388c6a6f94418b72ab89a14aac087e11dcc2ef7"
+}
