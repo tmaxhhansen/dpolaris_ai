@@ -240,7 +240,7 @@ class OrchestratorDaemon:
         payload = {"universe": "all"}
         body, status = self._request_json("POST", "/api/scan/start", payload, timeout=10)
         if status >= 400:
-            fallback_payload = {"universe": "combined_1000"}
+            fallback_payload = {"universe": "combined"}
             body, status = self._request_json("POST", "/api/scan/start", fallback_payload, timeout=10)
         if status >= 400:
             raise RuntimeError(f"scan start failed: status={status} body={body}")

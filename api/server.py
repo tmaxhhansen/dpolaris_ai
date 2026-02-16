@@ -147,28 +147,33 @@ SCAN_INDEX_FILE = "scan_results_index.json"
 SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
-UNIVERSE_CANONICAL_NAMES = ("nasdaq300", "wsb100", "combined400")
+UNIVERSE_CANONICAL_NAMES = ("nasdaq500", "wsb100", "combined", "custom")
 UNIVERSE_ALIAS_MAP = {
-    "nasdaq300": "nasdaq300",
-    "nasdaq_top_500": "nasdaq300",
-    "nasdaqtop500": "nasdaq300",
-    "nasdaq_top500": "nasdaq300",
+    "nasdaq500": "nasdaq500",
+    "nasdaq300": "nasdaq500",
+    "nasdaq_top_500": "nasdaq500",
+    "nasdaqtop500": "nasdaq500",
+    "nasdaq_top500": "nasdaq500",
     "wsb100": "wsb100",
     "wsb_top_500": "wsb100",
     "wsbtop500": "wsb100",
     "wsb_top500": "wsb100",
     "wsb_favorites": "wsb100",
     "wsbfavorites": "wsb100",
-    "combined": "combined400",
-    "combined400": "combined400",
-    "combined_400": "combined400",
-    "combined_1000": "combined400",
-    "combined1000": "combined400",
+    "combined": "combined",
+    "combined400": "combined",
+    "combined_400": "combined",
+    "combined_1000": "combined",
+    "combined1000": "combined",
+    "custom": "custom",
+    "customstocks": "custom",
+    "custom_stocks": "custom",
 }
 UNIVERSE_FILE_CANDIDATES = {
-    "nasdaq300": ("nasdaq300.json", "nasdaq_top_500.json", "nasdaq_top500.json"),
+    "nasdaq500": ("nasdaq500.json", "nasdaq300.json", "nasdaq_top_500.json", "nasdaq_top500.json"),
     "wsb100": ("wsb100.json", "wsb_top_500.json", "wsb_top500.json"),
-    "combined400": ("combined400.json", "combined.json", "combined_1000.json"),
+    "combined": ("combined.json", "combined400.json", "combined_1000.json"),
+    "custom": ("custom.json",),
 }
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
@@ -915,8 +920,10 @@ def _symbols_from_universe_payload(payload: dict[str, Any]) -> list[str]:
     for key in (
         "tickers",
         "merged",
+        "nasdaq500",
         "nasdaq300",
         "wsb100",
+        "custom",
         "nasdaq_top_500",
         "wsb_top_500",
         "items",
@@ -940,10 +947,12 @@ def _symbols_from_universe_payload(payload: dict[str, Any]) -> list[str]:
 def _existing_universe_symbols() -> list[str]:
     universe_dir = _universe_root()
     paths = [
+        universe_dir / "nasdaq500.json",
         universe_dir / "nasdaq300.json",
         universe_dir / "wsb100.json",
-        universe_dir / "combined400.json",
         universe_dir / "combined.json",
+        universe_dir / "combined400.json",
+        universe_dir / "custom.json",
         universe_dir / "nasdaq_top_500.json",
         universe_dir / "wsb_top_500.json",
         universe_dir / "combined_1000.json",
@@ -977,7 +986,7 @@ def _fallback_symbols(minimum: int = FALLBACK_SYMBOL_POOL_TARGET) -> list[str]:
     return _with_synthetic_tail(base, minimum)
 
 
-def _build_fallback_nasdaq_payload(symbols: list[str], *, top_n: int = 300) -> dict[str, Any]:
+def _build_fallback_nasdaq_payload(symbols: list[str], *, top_n: int = 500) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc).isoformat()
     limited = symbols[: max(1, int(top_n))]
     rows = [
@@ -996,7 +1005,7 @@ def _build_fallback_nasdaq_payload(symbols: list[str], *, top_n: int = 300) -> d
         for symbol in limited
     ]
     payload = {
-        "name": "nasdaq300",
+        "name": "nasdaq500",
         "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
         "generated_at": generated_at,
         "updated_at": generated_at,
@@ -1083,8 +1092,9 @@ def _build_fallback_wsb_payload(symbols: list[str], *, top_n: int = 100) -> dict
 def _build_fallback_combined_payload(
     ns_payload: dict[str, Any],
     ws_payload: dict[str, Any],
+    custom_payload: Optional[dict[str, Any]] = None,
     *,
-    top_n: int = 400,
+    top_n: int = 700,
 ) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc).isoformat()
     merged: dict[str, dict[str, Any]] = {}
@@ -1146,6 +1156,40 @@ def _build_fallback_combined_payload(
         if "wsb_top_500" not in item["sources"]:
             item["sources"].append("wsb_top_500")
 
+    for item in (custom_payload or {}).get("tickers") or []:
+        if isinstance(item, dict):
+            symbol = _sanitize_symbol(item.get("symbol") or item.get("ticker"))
+            row = item
+        else:
+            symbol = _sanitize_symbol(item)
+            row = {}
+        if not symbol:
+            continue
+        merged_item = merged.setdefault(
+            symbol,
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "company_name": symbol,
+                "market_cap": None,
+                "avg_volume_7d": None,
+                "avg_dollar_volume": None,
+                "change_pct_1d": None,
+                "change_percent_1d": None,
+                "sector": None,
+                "industry": None,
+                "mention_count": 0,
+                "mention_velocity": 0.0,
+                "sentiment_score": None,
+                "sources": [],
+            },
+        )
+        merged_item["name"] = row.get("name") or merged_item.get("name") or symbol
+        merged_item["company_name"] = row.get("company_name") or merged_item.get("company_name") or symbol
+        merged_item["sector"] = row.get("sector") if row.get("sector") is not None else merged_item.get("sector")
+        if "custom" not in merged_item["sources"]:
+            merged_item["sources"].append("custom")
+
     merged_rows = sorted(
         merged.values(),
         key=lambda x: (
@@ -1158,7 +1202,7 @@ def _build_fallback_combined_payload(
     )[: max(1, int(top_n))]
 
     payload = {
-        "name": "combined400",
+        "name": "combined",
         "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
         "generated_at": generated_at,
         "updated_at": generated_at,
@@ -1170,12 +1214,15 @@ def _build_fallback_combined_payload(
         "data_sources": [
             {"name": "nasdaq_top_500", "count": len(ns_payload.get("tickers") or [])},
             {"name": "wsb_top_500", "count": len(ws_payload.get("tickers") or [])},
+            {"name": "custom", "count": len((custom_payload or {}).get("tickers") or [])},
         ],
         "notes": [
             "Fallback combined universe generated in API runtime due missing universe files.",
         ],
+        "nasdaq500": ns_payload.get("tickers") or [],
         "nasdaq300": ns_payload.get("tickers") or [],
         "wsb100": ws_payload.get("tickers") or [],
+        "custom": (custom_payload or {}).get("tickers") or [],
         "nasdaq_top_500": ns_payload.get("tickers") or [],
         "wsb_top_500": ws_payload.get("tickers") or [],
         "tickers": merged_rows,
@@ -1188,6 +1235,86 @@ def _candidate_universe_paths(canonical_name: str) -> list[Path]:
     universe_dir = _universe_root()
     names = UNIVERSE_FILE_CANDIDATES.get(canonical_name, ())
     return [universe_dir / name for name in names]
+
+
+def _custom_universe_path() -> Path:
+    return _universe_root() / "custom.json"
+
+
+def _load_custom_universe_payload() -> dict[str, Any]:
+    path = _custom_universe_path()
+    payload = _json_load(path)
+    if isinstance(payload, dict):
+        raw = payload.get("tickers")
+        tickers = raw if isinstance(raw, list) else []
+    elif isinstance(payload, list):
+        tickers = payload
+    else:
+        tickers = []
+
+    normalized: list[str] = []
+    for item in tickers:
+        if isinstance(item, dict):
+            value = item.get("symbol") or item.get("ticker")
+        else:
+            value = item
+        if value is None:
+            continue
+        normalized.append(str(value))
+    cleaned = _dedupe_symbols(normalized)
+    body = {
+        "updated_at": (
+            payload.get("updated_at")
+            if isinstance(payload, dict) and isinstance(payload.get("updated_at"), str)
+            else utc_now_iso()
+        ),
+        "tickers": cleaned,
+    }
+    if not path.exists():
+        _json_dump(path, body)
+    return body
+
+
+def _save_custom_universe_symbols(symbols: list[str]) -> dict[str, Any]:
+    body = {
+        "updated_at": utc_now_iso(),
+        "tickers": _dedupe_symbols(symbols),
+    }
+    _json_dump(_custom_universe_path(), body)
+    return body
+
+
+def _refresh_combined_universe_file() -> None:
+    universe_dir = _universe_root()
+    universe_dir.mkdir(parents=True, exist_ok=True)
+
+    ns_path = _ensure_default_universe_file("nasdaq500") or (universe_dir / "nasdaq500.json")
+    ws_path = _ensure_default_universe_file("wsb100") or (universe_dir / "wsb100.json")
+    custom_payload = _load_custom_universe_payload()
+
+    ns_payload = _json_load(ns_path) if ns_path is not None else None
+    ws_payload = _json_load(ws_path) if ws_path is not None else None
+    if not isinstance(ns_payload, dict):
+        ns_payload = _build_fallback_nasdaq_payload(_fallback_symbols(), top_n=500)
+    if not isinstance(ws_payload, dict):
+        ws_payload = _build_fallback_wsb_payload(_fallback_symbols(), top_n=100)
+
+    combined_payload = _build_fallback_combined_payload(
+        ns_payload,
+        ws_payload,
+        custom_payload,
+        top_n=max(
+            1,
+            len(ns_payload.get("tickers") or [])
+            + len(ws_payload.get("tickers") or [])
+            + len(custom_payload.get("tickers") or []),
+        ),
+    )
+    combined_payload["name"] = "combined"
+    combined_payload["updated_at"] = utc_now_iso()
+    combined_payload = _universe_with_hash(combined_payload)
+    _json_dump(universe_dir / "combined.json", combined_payload)
+    _json_dump(universe_dir / "combined400.json", combined_payload)
 
 
 def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
@@ -1203,32 +1330,59 @@ def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
             return candidate
 
     symbols = _fallback_symbols()
-    nasdaq_path = universe_dir / "nasdaq300.json"
+    nasdaq_path = universe_dir / "nasdaq500.json"
     wsb_path = universe_dir / "wsb100.json"
-    combined_path = universe_dir / "combined400.json"
-    legacy_combined_path = universe_dir / "combined.json"
+    combined_path = universe_dir / "combined.json"
+    legacy_combined_path = universe_dir / "combined400.json"
+    custom_path = universe_dir / "custom.json"
 
-    if canonical == "nasdaq300":
-        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols, top_n=300))
+    if canonical == "nasdaq500":
+        payload = _build_fallback_nasdaq_payload(symbols, top_n=500)
+        _json_dump(nasdaq_path, payload)
+        # keep legacy alias file in sync
+        _json_dump(universe_dir / "nasdaq300.json", payload)
         return nasdaq_path
 
     if canonical == "wsb100":
         _json_dump(wsb_path, _build_fallback_wsb_payload(symbols, top_n=100))
         return wsb_path
 
-    ns_existing = next((p for p in _candidate_universe_paths("nasdaq300") if p.exists() and p.is_file()), nasdaq_path)
+    if canonical == "custom":
+        if custom_path.exists() and custom_path.is_file():
+            return custom_path
+        _json_dump(custom_path, {"updated_at": utc_now_iso(), "tickers": []})
+        return custom_path
+
+    ns_existing = next((p for p in _candidate_universe_paths("nasdaq500") if p.exists() and p.is_file()), nasdaq_path)
     ws_existing = next((p for p in _candidate_universe_paths("wsb100") if p.exists() and p.is_file()), wsb_path)
+    custom_existing = next((p for p in _candidate_universe_paths("custom") if p.exists() and p.is_file()), custom_path)
 
     if not ns_existing.exists():
-        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols, top_n=300))
+        payload = _build_fallback_nasdaq_payload(symbols, top_n=500)
+        _json_dump(nasdaq_path, payload)
+        _json_dump(universe_dir / "nasdaq300.json", payload)
         ns_existing = nasdaq_path
     if not ws_existing.exists():
         _json_dump(wsb_path, _build_fallback_wsb_payload(symbols, top_n=100))
         ws_existing = wsb_path
+    if not custom_existing.exists():
+        _json_dump(custom_path, {"updated_at": utc_now_iso(), "tickers": []})
+        custom_existing = custom_path
 
-    ns_payload = _json_load(ns_existing) or _build_fallback_nasdaq_payload(symbols, top_n=300)
+    ns_payload = _json_load(ns_existing) or _build_fallback_nasdaq_payload(symbols, top_n=500)
     ws_payload = _json_load(ws_existing) or _build_fallback_wsb_payload(symbols, top_n=100)
-    combined_payload = _build_fallback_combined_payload(ns_payload, ws_payload, top_n=400)
+    custom_payload = _json_load(custom_existing) or {"updated_at": utc_now_iso(), "tickers": []}
+    combined_payload = _build_fallback_combined_payload(
+        ns_payload,
+        ws_payload,
+        custom_payload,
+        top_n=max(
+            1,
+            len(ns_payload.get("tickers") or [])
+            + len(ws_payload.get("tickers") or [])
+            + len(custom_payload.get("tickers") or []),
+        ),
+    )
     _json_dump(combined_path, combined_payload)
     _json_dump(legacy_combined_path, combined_payload)
     return combined_path
@@ -1488,6 +1642,7 @@ def _enrich_universe_rows_with_metadata(rows: list[dict[str, Any]]) -> list[dict
             date_text = analysis_dates.get(symbol)
             if date_text:
                 row["analysis_date"] = date_text
+                row["last_analysis_date"] = date_text
 
     return rows
 
@@ -1533,19 +1688,23 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
         rows = payload.get("tickers") or []
     else:
         rows = (
-            (payload.get("nasdaq300") or [])
+            (payload.get("nasdaq500") or [])
+            + (payload.get("nasdaq300") or [])
             + (payload.get("wsb100") or [])
+            + (payload.get("custom") or [])
             + (payload.get("nasdaq_top_500") or [])
             + (payload.get("wsb_top_500") or [])
         )
 
-    if canonical_name == "combined400" and not rows:
-        ns_payload, ns_rows, _ = _load_scan_universe("nasdaq300")
+    if canonical_name == "combined" and not rows:
+        ns_payload, ns_rows, _ = _load_scan_universe("nasdaq500")
         ws_payload, ws_rows, _ = _load_scan_universe("wsb100")
+        custom_payload, custom_rows, _ = _load_scan_universe("custom")
         payload = _build_fallback_combined_payload(
             ns_payload or {"tickers": ns_rows},
             ws_payload or {"tickers": ws_rows},
-            top_n=max(1, len(ns_rows) + len(ws_rows)),
+            custom_payload or {"tickers": custom_rows},
+            top_n=max(1, len(ns_rows) + len(ws_rows) + len(custom_rows)),
         )
         rows = payload.get("tickers") or payload.get("merged") or []
 
@@ -1570,7 +1729,9 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
                     "change_pct_1d": None,
                     "change_percent_1d": None,
                     "analysis_date": None,
+                    "last_analysis_date": None,
                     "mention_count": None,
+                    "mentions": None,
                     "mention_velocity": None,
                 }
             )
@@ -1610,11 +1771,22 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
                     if raw.get("change_percent_1d") is not None
                     else raw.get("change_pct_1d")
                 ),
-                "analysis_date": raw.get("analysis_date"),
-                "mention_count": raw.get("mention_count"),
+                "analysis_date": raw.get("analysis_date") or raw.get("last_analysis_date"),
+                "last_analysis_date": raw.get("last_analysis_date") or raw.get("analysis_date"),
+                "mention_count": raw.get("mention_count") if raw.get("mention_count") is not None else raw.get("mentions"),
+                "mentions": raw.get("mentions") if raw.get("mentions") is not None else raw.get("mention_count"),
                 "mention_velocity": raw.get("mention_velocity"),
             }
         )
+
+    if canonical_name == "custom":
+        payload["name"] = "custom"
+        if normalized:
+            normalized = _enrich_universe_rows_with_metadata(normalized)
+        if "updated_at" not in payload:
+            payload["updated_at"] = payload.get("generated_at") or payload.get("updated_at") or utc_now_iso()
+        payload.setdefault("generated_at", payload.get("updated_at"))
+        return payload, normalized, path
 
     if not normalized:
         raise ValueError(f"No tickers found in universe: {path}")
@@ -3420,8 +3592,12 @@ class DeepLearningTrainJobRequest(BaseModel):
     epochs: int = Field(default=50, ge=1, le=500)
 
 
+class CustomUniverseSymbolRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+
+
 class ScanStartRequest(BaseModel):
-    universe: str = Field(default="combined400")
+    universe: str = Field(default="combined")
     run_mode: str = Field(default="scan", alias="runMode")
     horizon_config: dict[str, Any] = Field(default_factory=dict, alias="horizonConfig")
     options_mode: bool = Field(default=False, alias="optionsMode")
@@ -4402,27 +4578,104 @@ def _enforce_wsb_min_mentions(
     return payload
 
 
+def _normalize_nasdaq500_payload(
+    payload: dict[str, Any],
+    *,
+    top_n: int,
+    fallback_symbols: list[str],
+) -> dict[str, Any]:
+    rows = list(payload.get("tickers") or [])
+    enriched: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = _sanitize_symbol(row.get("symbol"))
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        clean = dict(row)
+        clean["symbol"] = symbol
+        clean.setdefault("name", clean.get("company_name") or symbol)
+        clean.setdefault("company_name", clean.get("name") or symbol)
+        clean.setdefault("sector", None)
+        clean.setdefault("market_cap", None)
+        clean.setdefault("avg_volume_7d", clean.get("avg_dollar_volume"))
+        clean.setdefault("change_pct_1d", clean.get("change_percent_1d"))
+        enriched.append(clean)
+
+    ranked = [row for row in enriched if _coerce_optional_float(row.get("market_cap")) is not None]
+    unknown = [row for row in enriched if _coerce_optional_float(row.get("market_cap")) is None]
+
+    ranked.sort(
+        key=lambda row: (
+            float(_coerce_optional_float(row.get("market_cap")) or 0.0),
+            str(row.get("symbol") or ""),
+        ),
+        reverse=True,
+    )
+    unknown.sort(key=lambda row: str(row.get("symbol") or ""))
+
+    ordered = ranked + unknown
+
+    for symbol in fallback_symbols:
+        safe_symbol = _sanitize_symbol(symbol)
+        if not safe_symbol or safe_symbol in seen:
+            continue
+        seen.add(safe_symbol)
+        ordered.append(
+            {
+                "symbol": safe_symbol,
+                "name": safe_symbol,
+                "company_name": safe_symbol,
+                "sector": None,
+                "market_cap": None,
+                "avg_volume_7d": None,
+                "change_pct_1d": None,
+            }
+        )
+        if len(ordered) >= max(1, int(top_n)):
+            break
+
+    payload["tickers"] = ordered[: max(1, int(top_n))]
+    criteria = dict(payload.get("criteria") or {})
+    criteria["top_n_requested"] = int(top_n)
+    criteria["top_n_returned"] = len(payload["tickers"])
+    criteria["ranking"] = "market_cap_desc_then_symbol"
+    payload["criteria"] = criteria
+    return payload
+
+
 def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
     universe_dir = _universe_root()
     universe_dir.mkdir(parents=True, exist_ok=True)
+    custom_payload = _load_custom_universe_payload()
 
     if build_nasdaq_top_500 is None or build_wsb_top_500 is None or build_combined_universe is None:
         warnings = ["Universe builder dependency unavailable; generated deterministic fallback payloads."]
         symbols = _fallback_symbols()
-        nasdaq_payload = _build_fallback_nasdaq_payload(symbols, top_n=300)
+        nasdaq_payload = _build_fallback_nasdaq_payload(symbols, top_n=500)
         wsb_payload = _build_fallback_wsb_payload(symbols, top_n=100)
-        combined_payload = _build_fallback_combined_payload(nasdaq_payload, wsb_payload, top_n=400)
+        combined_payload = _build_fallback_combined_payload(
+            nasdaq_payload,
+            wsb_payload,
+            custom_payload,
+            top_n=max(1, len(nasdaq_payload.get("tickers") or []) + len(wsb_payload.get("tickers") or []) + len(custom_payload.get("tickers") or [])),
+        )
+        _json_dump(universe_dir / "nasdaq500.json", nasdaq_payload)
         _json_dump(universe_dir / "nasdaq300.json", nasdaq_payload)
         _json_dump(universe_dir / "wsb100.json", wsb_payload)
-        _json_dump(universe_dir / "combined400.json", combined_payload)
         _json_dump(universe_dir / "combined.json", combined_payload)
+        _json_dump(universe_dir / "combined400.json", combined_payload)
         return {
             "status": "ok",
             "warnings": warnings,
             "universes": {
-                "nasdaq300": {"count": len(nasdaq_payload.get("tickers") or [])},
+                "nasdaq500": {"count": len(nasdaq_payload.get("tickers") or [])},
                 "wsb100": {"count": len(wsb_payload.get("tickers") or [])},
-                "combined400": {"count": len(combined_payload.get("tickers") or [])},
+                "combined": {"count": len(combined_payload.get("tickers") or [])},
+                "custom": {"count": len(custom_payload.get("tickers") or [])},
             },
             "generated_at": utc_now_iso(),
         }
@@ -4456,22 +4709,28 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
             "industry": None,
         }
 
-    nasdaq_path = universe_dir / "nasdaq300.json"
+    nasdaq_path = universe_dir / "nasdaq500.json"
     wsb_path = universe_dir / "wsb100.json"
-    combined_path = universe_dir / "combined400.json"
-    combined_legacy_path = universe_dir / "combined.json"
+    combined_path = universe_dir / "combined.json"
+    combined_legacy_path = universe_dir / "combined400.json"
 
     nasdaq_payload = build_nasdaq_top_500(
         output_path=nasdaq_path,
-        top_n=300,
+        top_n=500,
         min_avg_dollar_volume=0.0,
-        candidate_limit=max(320, _int_env("DPOLARIS_NASDAQ_CANDIDATE_LIMIT", 340)),
+        candidate_limit=max(520, _int_env("DPOLARIS_NASDAQ_CANDIDATE_LIMIT", 1200)),
         profile_fetcher=profile_fetcher,
     )
-    nasdaq_payload["name"] = "nasdaq300"
+    nasdaq_payload = _normalize_nasdaq500_payload(
+        nasdaq_payload,
+        top_n=500,
+        fallback_symbols=_fallback_symbols(minimum=520),
+    )
+    nasdaq_payload["name"] = "nasdaq500"
     nasdaq_payload["updated_at"] = utc_now_iso()
     nasdaq_payload = _universe_with_hash(nasdaq_payload)
     _json_dump(nasdaq_path, nasdaq_payload)
+    _json_dump(universe_dir / "nasdaq300.json", nasdaq_payload)
 
     valid_tickers = {
         _sanitize_symbol((row or {}).get("symbol"))
@@ -4518,16 +4777,21 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
     wsb_payload = _universe_with_hash(wsb_payload)
     _json_dump(wsb_path, wsb_payload)
 
-    combined_payload = build_combined_universe(
-        output_path=combined_path,
-        nasdaq_payload=nasdaq_payload,
-        wsb_payload=wsb_payload,
-        top_n=400,
+    combined_payload = _build_fallback_combined_payload(
+        nasdaq_payload,
+        wsb_payload,
+        custom_payload,
+        top_n=max(
+            1,
+            len(nasdaq_payload.get("tickers") or [])
+            + len(wsb_payload.get("tickers") or [])
+            + len(custom_payload.get("tickers") or []),
+        ),
     )
-    combined_payload["name"] = "combined400"
+    combined_payload["name"] = "combined"
     combined_payload["updated_at"] = utc_now_iso()
-    merged_rows = list(combined_payload.get("merged") or [])
-    combined_payload["tickers"] = merged_rows[:400]
+    merged_rows = list(combined_payload.get("merged") or combined_payload.get("tickers") or [])
+    combined_payload["tickers"] = merged_rows
     combined_payload = _universe_with_hash(combined_payload)
     _json_dump(combined_path, combined_payload)
     _json_dump(combined_legacy_path, combined_payload)
@@ -4542,7 +4806,7 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
             "mentions": provider_name,
         },
         "universes": {
-            "nasdaq300": {
+            "nasdaq500": {
                 "path": str(nasdaq_path),
                 "count": len(nasdaq_payload.get("tickers") or []),
                 "universe_hash": nasdaq_payload.get("universe_hash"),
@@ -4552,10 +4816,15 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
                 "count": len(wsb_payload.get("tickers") or []),
                 "universe_hash": wsb_payload.get("universe_hash"),
             },
-            "combined400": {
+            "combined": {
                 "path": str(combined_path),
                 "count": len(combined_payload.get("tickers") or []),
                 "universe_hash": combined_payload.get("universe_hash"),
+            },
+            "custom": {
+                "path": str(_custom_universe_path()),
+                "count": len(custom_payload.get("tickers") or []),
+                "universe_hash": None,
             },
         },
         "generated_at": utc_now_iso(),
@@ -4598,11 +4867,9 @@ def _list_available_universes() -> list[dict[str, Any]]:
 @app.get("/api/universe/list")
 async def list_universe_names():
     """Return canonical universe names for control-center clients."""
-    names = [item["name"] for item in _list_available_universes()]
     for canonical in UNIVERSE_CANONICAL_NAMES:
-        if canonical not in names:
-            names.append(canonical)
-    return names
+        _ensure_default_universe_file(canonical)
+    return list(UNIVERSE_CANONICAL_NAMES)
 
 
 @app.post("/api/universe/rebuild")
@@ -4619,6 +4886,53 @@ async def rebuild_universes_endpoint(force: bool = Query(False)):
             "warnings": ["Universe rebuild failed; existing universe files were kept."],
             "generated_at": utc_now_iso(),
         }
+
+
+@app.get("/api/universe/custom")
+async def get_custom_universe_endpoint():
+    return await get_scan_universe("custom")
+
+
+@app.post("/api/universe/custom/add")
+async def add_custom_universe_symbol(request: CustomUniverseSymbolRequest):
+    symbol = _sanitize_symbol(request.symbol)
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+
+    payload = _load_custom_universe_payload()
+    symbols = list(payload.get("tickers") or [])
+    if symbol not in symbols:
+        symbols.append(symbol)
+    saved = _save_custom_universe_symbols(symbols)
+    _refresh_combined_universe_file()
+
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        "updated_at": saved.get("updated_at"),
+        "count": len(saved.get("tickers") or []),
+        "tickers": saved.get("tickers") or [],
+    }
+
+
+@app.post("/api/universe/custom/remove")
+async def remove_custom_universe_symbol(request: CustomUniverseSymbolRequest):
+    symbol = _sanitize_symbol(request.symbol)
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+
+    payload = _load_custom_universe_payload()
+    symbols = [item for item in (payload.get("tickers") or []) if _sanitize_symbol(item) != symbol]
+    saved = _save_custom_universe_symbols(symbols)
+    _refresh_combined_universe_file()
+
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        "updated_at": saved.get("updated_at"),
+        "count": len(saved.get("tickers") or []),
+        "tickers": saved.get("tickers") or [],
+    }
 
 
 @app.get("/universe/list")
@@ -4661,12 +4975,33 @@ async def get_scan_universe(universe_name: str):
     response_rows: list[dict[str, Any]] = []
     for raw in rows:
         row = dict(raw)
-        row["name"] = row.get("name") or row.get("company_name") or row.get("symbol")
-        row["mentions"] = row.get("mentions") if row.get("mentions") is not None else row.get("mention_count")
-        row.setdefault("avg_volume_7d", row.get("avg_dollar_volume"))
-        row.setdefault("change_pct_1d", row.get("change_percent_1d"))
-        row.setdefault("analysis_date", None)
-        response_rows.append(row)
+        symbol = _sanitize_symbol(row.get("symbol") or row.get("ticker"))
+        if not symbol:
+            continue
+        mentions = row.get("mentions")
+        if mentions is None:
+            mentions = row.get("mention_count")
+        analysis_date = row.get("last_analysis_date") or row.get("analysis_date")
+        response_rows.append(
+            {
+                "symbol": symbol,
+                "name": row.get("name") or row.get("company_name"),
+                "sector": row.get("sector"),
+                "market_cap": _coerce_optional_float(row.get("market_cap")),
+                "avg_volume_7d": _coerce_optional_float(
+                    row.get("avg_volume_7d")
+                    if row.get("avg_volume_7d") is not None
+                    else row.get("avg_dollar_volume")
+                ),
+                "change_pct_1d": _coerce_optional_float(
+                    row.get("change_pct_1d")
+                    if row.get("change_pct_1d") is not None
+                    else row.get("change_percent_1d")
+                ),
+                "mentions": _coerce_optional_int(mentions),
+                "last_analysis_date": str(analysis_date) if analysis_date else None,
+            }
+        )
 
     response = {
         "name": canonical_name,

@@ -148,9 +148,9 @@ class DPolarisScheduler:
             self.last_universe_build = datetime.now()
             logger.info(
                 "Universe build completed: nasdaq=%s wsb=%s combined=%s",
-                ((result.get("nasdaq_top_500") or {}).get("count")),
-                ((result.get("wsb_top_500") or {}).get("count")),
-                ((result.get("combined_1000") or {}).get("count")),
+                ((result.get("nasdaq500") or result.get("nasdaq_top_500") or {}).get("count")),
+                ((result.get("wsb100") or result.get("wsb_top_500") or {}).get("count")),
+                ((result.get("combined") or result.get("combined_1000") or {}).get("count")),
             )
         except Exception as e:
             logger.error(f"Universe build failed: {e}")

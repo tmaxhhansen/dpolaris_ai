@@ -88,7 +88,7 @@ def _default_runs_root() -> Path:
 
 
 def _default_universe_path() -> Path:
-    value = os.getenv("DPOLARIS_ACTIVE_UNIVERSE", "universe/combined_1000.json")
+    value = os.getenv("DPOLARIS_ACTIVE_UNIVERSE", "universe/combined.json")
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = _repo_root() / path

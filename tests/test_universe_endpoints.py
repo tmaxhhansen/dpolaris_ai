@@ -11,9 +11,9 @@ def test_universe_endpoints_generate_defaults(monkeypatch, tmp_path):
 
     names = asyncio.run(list_universe_names())
     assert isinstance(names, list)
-    assert {"nasdaq300", "wsb100", "combined400"}.issubset(set(names))
+    assert {"nasdaq500", "wsb100", "combined", "custom"}.issubset(set(names))
 
-    for name in ("nasdaq300", "wsb100", "combined400"):
+    for name in ("nasdaq500", "wsb100", "combined"):
         payload = asyncio.run(get_scan_universe(name))
         assert payload["name"] == name
         assert int(payload.get("count") or 0) > 0
@@ -27,6 +27,11 @@ def test_universe_endpoints_generate_defaults(monkeypatch, tmp_path):
         assert "market_cap" in first
         assert "avg_volume_7d" in first
         assert "change_pct_1d" in first
+        assert "last_analysis_date" in first
 
-    combined_alias = asyncio.run(get_scan_universe("combined"))
-    assert combined_alias["name"] == "combined400"
+    custom_payload = asyncio.run(get_scan_universe("custom"))
+    assert custom_payload["name"] == "custom"
+    assert int(custom_payload.get("count") or 0) == 0
+
+    combined_alias = asyncio.run(get_scan_universe("combined400"))
+    assert combined_alias["name"] == "combined"

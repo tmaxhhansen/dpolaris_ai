@@ -352,16 +352,16 @@ def orchestrator(host: str, port: int, interval_health: int, interval_scan: str,
 
 @cli.command("build-universe")
 def build_universe():
-    """Build Nasdaq + WSB universes and merged combined universe"""
+    """Build Nasdaq 500 + WSB 100 + combined universe files."""
     from universe.builder import build_daily_universe_files
 
     with console.status("[bold green]Building daily universes...[/bold green]"):
         result = build_daily_universe_files()
 
     console.print("[green]Universe build completed[/green]")
-    console.print(f"Nasdaq Top 500: {result['nasdaq_top_500']['path']}")
-    console.print(f"WSB Top 500: {result['wsb_top_500']['path']}")
-    console.print(f"Combined 1000: {result['combined_1000']['path']}")
+    console.print(f"Nasdaq 500: {result['nasdaq500']['path']}")
+    console.print(f"WSB 100: {result['wsb100']['path']}")
+    console.print(f"Combined: {result['combined']['path']}")
 
 
 @cli.command()

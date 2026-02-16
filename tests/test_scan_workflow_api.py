@@ -47,7 +47,7 @@ def test_scan_job_persists_results_and_continues_on_failure(tmp_path, monkeypatc
     monkeypatch.setattr(
         server,
         "_load_scan_universe",
-        lambda _: (universe_payload, universe_rows, Path("/tmp/combined_1000.json")),
+        lambda _: (universe_payload, universe_rows, Path("/tmp/combined.json")),
     )
 
     async def _fake_build(**kwargs):
@@ -62,7 +62,7 @@ def test_scan_job_persists_results_and_continues_on_failure(tmp_path, monkeypatc
     monkeypatch.setattr(server, "scan_job_order", [])
     monkeypatch.setattr(server, "scan_job_queue", asyncio.Queue())
 
-    req = server.ScanStartRequest(universe="combined_1000", options_mode=False)
+    req = server.ScanStartRequest(universe="combined", options_mode=False)
     started = asyncio.run(server.start_scan(req))
     run_id = started["runId"]
 
@@ -86,4 +86,3 @@ def test_scan_job_persists_results_and_continues_on_failure(tmp_path, monkeypatc
     listed = asyncio.run(server.get_scan_results(run_id, page=1, page_size=50, status=None))
     assert listed["total"] == 2
     assert {row["ticker"] for row in listed["items"]} == {"AAA", "BBB"}
-

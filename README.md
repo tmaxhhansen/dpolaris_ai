@@ -80,7 +80,7 @@ These provide a stable API surface for external control services.
 python scripts/smoke_control_center.py --host 127.0.0.1 --port 8420
 ```
 
-### Universe API (Nasdaq/WSB/Combined)
+### Universe API (Nasdaq 500 / WSB 100 / Combined / Custom)
 
 Universe source of truth is filesystem JSON under:
 - `~/dpolaris_data/universe/` by default
@@ -90,25 +90,32 @@ If files are missing, deterministic defaults are generated on first request so U
 
 ```bash
 curl http://127.0.0.1:8420/api/universe/list
-curl http://127.0.0.1:8420/api/universe/nasdaq300
+curl http://127.0.0.1:8420/api/universe/nasdaq500
 curl http://127.0.0.1:8420/api/universe/wsb100
-curl http://127.0.0.1:8420/api/universe/combined400
+curl http://127.0.0.1:8420/api/universe/combined
+curl http://127.0.0.1:8420/api/universe/custom
+curl -X POST 'http://127.0.0.1:8420/api/universe/custom/add' \
+  -H 'Content-Type: application/json' \
+  -d '{"symbol":"AAPL"}'
+curl -X POST 'http://127.0.0.1:8420/api/universe/custom/remove' \
+  -H 'Content-Type: application/json' \
+  -d '{"symbol":"AAPL"}'
 curl -X POST 'http://127.0.0.1:8420/api/universe/rebuild?force=true'
 ```
 
 Expected:
-- `/api/universe/list` returns names including `nasdaq300`, `wsb100`, `combined400`
+- `/api/universe/list` returns names including `nasdaq500`, `wsb100`, `combined`, `custom`
 - each universe endpoint returns `count > 0` and non-empty `tickers`
 - ticker rows include metadata keys for Java table rendering:
-  - `symbol`, `name`, `sector`, `market_cap`, `avg_volume_7d`, `change_pct_1d`, `mentions`, `analysis_date`
+  - `symbol`, `name`, `sector`, `market_cap`, `avg_volume_7d`, `change_pct_1d`, `mentions`, `last_analysis_date`
 
 Notes:
-- NASDAQ 300 candidates are parsed from NasdaqTrader `nasdaqlisted.txt`, then ranked by market cap (yfinance metadata).
+- NASDAQ 500 candidates are parsed from NasdaqTrader `nasdaqlisted.txt`, then ranked by market cap (yfinance metadata).
 - WSB 100 uses a mentions provider interface:
   - `PRAW` mode when `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` are configured
   - fallback cached JSON mode at `~/dpolaris_data/mentions/wsb_posts.json`
   - install optional dependency for live Reddit mode: `pip install praw`
-- Combined 400 is deduped union of NASDAQ + WSB sets.
+- Combined is a deduped union of NASDAQ + WSB + custom sets.
 
 ### News API (provider fallback, no-key safe)
 

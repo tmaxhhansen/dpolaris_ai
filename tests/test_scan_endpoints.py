@@ -10,15 +10,15 @@ def test_scan_universe_endpoint_generates_fallback_payload(tmp_path, monkeypatch
     monkeypatch.setattr(server, "_repo_root", lambda: tmp_path)
     monkeypatch.setenv("DPOLARIS_FALLBACK_SYMBOLS", "AAPL,MSFT,NVDA")
 
-    response = asyncio.run(server.get_scan_universe("nasdaq_top_500"))
-    assert response["name"] == "nasdaq_top_500"
+    response = asyncio.run(server.get_scan_universe("nasdaq500"))
+    assert response["name"] == "nasdaq500"
     assert response["count"] >= 3
     assert response["schema_version"] == "1.0.0"
     assert response["universe"]["universe_hash"]
 
     generated_path = Path(response["path"])
     assert generated_path.exists()
-    assert generated_path.name == "nasdaq_top_500.json"
+    assert generated_path.name in {"nasdaq500.json", "nasdaq300.json", "nasdaq_top_500.json"}
 
 
 def test_scan_runs_endpoint_lists_runs_from_disk_state(tmp_path, monkeypatch):
@@ -40,7 +40,7 @@ def test_scan_runs_endpoint_lists_runs_from_disk_state(tmp_path, monkeypatch):
             "updated_at": "2026-02-10T10:05:00",
             "started_at": "2026-02-10T10:00:05",
             "completed_at": "2026-02-10T10:04:55",
-            "universe": "combined_1000",
+            "universe": "combined",
             "universe_hash": "abc123",
             "run_mode": "scan",
             "horizon_days": 5,
@@ -70,4 +70,3 @@ def test_scan_runs_endpoint_lists_runs_from_disk_state(tmp_path, monkeypatch):
     assert item["universe_hash"] == "abc123"
     assert item["config_summary"].startswith("h=5d")
     assert float(item["primary_score"]) >= 0.69
-

@@ -26,9 +26,9 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger("dpolaris.universe")
 
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
-NASDAQ_TOP_FILE = "nasdaq_top_500.json"
-WSB_TOP_FILE = "wsb_top_500.json"
-COMBINED_TOP_FILE = "combined_1000.json"
+NASDAQ_TOP_FILE = "nasdaq500.json"
+WSB_TOP_FILE = "wsb100.json"
+COMBINED_TOP_FILE = "combined.json"
 
 _NASDAQ_SYMBOLS_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
 _REDDIT_WSB_NEW_URL = "https://www.reddit.com/r/wallstreetbets/new.json"
@@ -813,7 +813,7 @@ def build_daily_universe_files(
     universe_dir: Optional[str | Path] = None,
     now: Optional[datetime] = None,
     nasdaq_count: int = 500,
-    wsb_count: int = 500,
+    wsb_count: int = 100,
     wsb_window_days: int = 7,
     min_avg_dollar_volume: float = 10_000_000.0,
 ) -> dict[str, Any]:
@@ -846,22 +846,27 @@ def build_daily_universe_files(
         now=ts,
     )
 
-    return {
+    result = {
         "generated_at": _iso(ts),
         "universe_dir": str(base_dir),
-        "nasdaq_top_500": {
+        "nasdaq500": {
             "path": str(nasdaq_path),
             "universe_hash": nasdaq_payload.get("universe_hash"),
             "count": len(nasdaq_payload.get("tickers") or []),
         },
-        "wsb_top_500": {
+        "wsb100": {
             "path": str(wsb_path),
             "universe_hash": wsb_payload.get("universe_hash"),
             "count": len(wsb_payload.get("tickers") or []),
         },
-        "combined_1000": {
+        "combined": {
             "path": str(combined_path),
             "universe_hash": combined_payload.get("universe_hash"),
             "count": len(combined_payload.get("merged") or []),
         },
     }
+    # Backward-compatible aliases.
+    result["nasdaq_top_500"] = dict(result["nasdaq500"])
+    result["wsb_top_500"] = dict(result["wsb100"])
+    result["combined_1000"] = dict(result["combined"])
+    return result
