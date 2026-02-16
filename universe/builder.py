@@ -134,11 +134,13 @@ def _repo_root() -> Path:
 
 
 def _default_universe_dir() -> Path:
-    raw = os.getenv("DPOLARIS_UNIVERSE_DIR", "universe")
-    out = Path(raw).expanduser()
-    if not out.is_absolute():
-        out = _repo_root() / out
-    return out
+    raw = os.getenv("DPOLARIS_UNIVERSE_DIR", "").strip()
+    if raw:
+        out = Path(raw).expanduser()
+        if not out.is_absolute():
+            out = _repo_root() / out
+        return out
+    return Path("~/dpolaris_data/universe").expanduser()
 
 
 def _utc_now(now: Optional[datetime] = None) -> datetime:

@@ -82,19 +82,49 @@ python scripts/smoke_control_center.py --host 127.0.0.1 --port 8420
 
 ### Universe API (Nasdaq/WSB/Combined)
 
-Universe source of truth is filesystem JSON under `universe/` (or `DPOLARIS_UNIVERSE_DIR` when set).  
-If files are missing, deterministic defaults are generated on first request.
+Universe source of truth is filesystem JSON under:
+- `~/dpolaris_data/universe/` by default
+- `DPOLARIS_UNIVERSE_DIR` when explicitly set
+
+If files are missing, deterministic defaults are generated on first request so UI tabs never hard-fail.
 
 ```bash
 curl http://127.0.0.1:8420/api/universe/list
 curl http://127.0.0.1:8420/api/universe/nasdaq300
 curl http://127.0.0.1:8420/api/universe/wsb100
-curl http://127.0.0.1:8420/api/universe/combined
+curl http://127.0.0.1:8420/api/universe/combined400
+curl -X POST 'http://127.0.0.1:8420/api/universe/rebuild?force=true'
 ```
 
 Expected:
-- `/api/universe/list` returns names including `nasdaq300`, `wsb100`, `combined`
+- `/api/universe/list` returns names including `nasdaq300`, `wsb100`, `combined400`
 - each universe endpoint returns `count > 0` and non-empty `tickers`
+- ticker rows include metadata keys for Java table rendering:
+  - `symbol`, `name`, `sector`, `market_cap`, `avg_volume_7d`, `change_pct_1d`, `mentions`, `analysis_date`
+
+Notes:
+- NASDAQ 300 candidates are parsed from NasdaqTrader `nasdaqlisted.txt`, then ranked by market cap (yfinance metadata).
+- WSB 100 uses a mentions provider interface:
+  - `PRAW` mode when `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` are configured
+  - fallback cached JSON mode at `~/dpolaris_data/mentions/wsb_posts.json`
+  - install optional dependency for live Reddit mode: `pip install praw`
+- Combined 400 is deduped union of NASDAQ + WSB sets.
+
+### News API (provider fallback, no-key safe)
+
+```bash
+curl 'http://127.0.0.1:8420/api/news/AAPL?limit=20'
+```
+
+Response shape:
+- `symbol`, `provider`, `count`, `items[]`, `warnings[]`, `cached`, `updated_at`
+- each item has: `source`, `title`, `url`, `published_at`
+
+Provider order:
+1. Finnhub (`FINNHUB_API_KEY`)
+2. Marketaux (`MARKETAUX_API_KEY`)
+3. NewsAPI (`NEWSAPI_API_KEY`)
+4. disabled fallback (empty list, warning only)
 
 ### Analysis Report Pipeline (LLM-free)
 
@@ -118,8 +148,8 @@ curl 'http://127.0.0.1:8420/api/analysis/<analysis_id>'
 ```
 
 Notes:
-- Default news mode is disabled (`DPOLARIS_NEWS_PROVIDER=disabled`) for deterministic, keyless operation.
-- Optional lightweight news mode: `DPOLARIS_NEWS_PROVIDER=yfinance`.
+- Default news provider is keyless disabled fallback (returns empty list with warnings).
+- Set `FINNHUB_API_KEY`, `MARKETAUX_API_KEY`, or `NEWSAPI_API_KEY` to enable live headline ingestion.
 
 ## Windows Orchestrator Notes
 

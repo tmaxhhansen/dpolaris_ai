@@ -98,6 +98,24 @@ except Exception:  # pragma: no cover
     default_version_info = None
     generate_analysis_report = None
 
+try:
+    from universe.builder import (
+        build_combined_universe,
+        build_nasdaq_top_500,
+        build_wsb_top_500,
+    )
+    from universe.providers import build_mentions_provider
+except Exception:  # pragma: no cover
+    build_combined_universe = None
+    build_nasdaq_top_500 = None
+    build_wsb_top_500 = None
+    build_mentions_provider = None
+
+try:
+    from news.providers import fetch_news_with_cache
+except Exception:  # pragma: no cover
+    fetch_news_with_cache = None
+
 logger = logging.getLogger("dpolaris.api")
 
 # Global instances
@@ -129,7 +147,7 @@ SCAN_INDEX_FILE = "scan_results_index.json"
 SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
-UNIVERSE_CANONICAL_NAMES = ("nasdaq300", "wsb100", "combined")
+UNIVERSE_CANONICAL_NAMES = ("nasdaq300", "wsb100", "combined400")
 UNIVERSE_ALIAS_MAP = {
     "nasdaq300": "nasdaq300",
     "nasdaq_top_500": "nasdaq300",
@@ -141,14 +159,16 @@ UNIVERSE_ALIAS_MAP = {
     "wsb_top500": "wsb100",
     "wsb_favorites": "wsb100",
     "wsbfavorites": "wsb100",
-    "combined": "combined",
-    "combined_1000": "combined",
-    "combined1000": "combined",
+    "combined": "combined400",
+    "combined400": "combined400",
+    "combined_400": "combined400",
+    "combined_1000": "combined400",
+    "combined1000": "combined400",
 }
 UNIVERSE_FILE_CANDIDATES = {
     "nasdaq300": ("nasdaq300.json", "nasdaq_top_500.json", "nasdaq_top500.json"),
     "wsb100": ("wsb100.json", "wsb_top_500.json", "wsb_top500.json"),
-    "combined": ("combined.json", "combined_1000.json"),
+    "combined400": ("combined400.json", "combined.json", "combined_1000.json"),
 }
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
@@ -156,7 +176,24 @@ FALLBACK_UNIVERSE_SYMBOLS = [
     "MU", "LRCX", "ADI", "PANW", "KLAC", "CRWD", "MELI", "MAR", "MDLZ", "ADP",
     "SBUX", "AMGN", "ISRG", "PYPL", "GILD", "REGN", "VRTX", "ABNB", "DASH", "SNPS",
     "CDNS", "FTNT", "ORLY", "CTAS", "CSX", "ROP", "CMCSA", "TMUS", "PDD", "ASML",
+    "AMZN", "PLTR", "HOOD", "COIN", "RIVN", "SOFI", "ROKU", "SHOP", "UBER", "LYFT",
+    "BABA", "JD", "BIDU", "MRNA", "BIIB", "ILMN", "DXCM", "IDXX", "TEAM", "DDOG",
+    "NET", "ZS", "OKTA", "DOCU", "MDB", "SNOW", "CRSP", "EXAS", "TTD", "WDAY",
+    "ANSS", "PAYX", "MNST", "KDP", "CHTR", "EA", "ATVI", "TTWO", "MTCH", "EBAY",
+    "FAST", "EXC", "XEL", "AEP", "PCAR", "ODFL", "UAL", "LUV", "DAL", "CCL",
+    "NCLH", "UAL", "FSLR", "ENPH", "SEDG", "RUN", "CHWY", "CVNA", "NDAQ", "ICE",
+    "MSCI", "SPGI", "BLK", "SCHW", "GS", "MS", "JPM", "BAC", "C", "WFC",
+    "V", "MA", "AXP", "PYPL", "SQ", "AFRM", "UPST", "MSTR", "RIOT", "MARA",
+    "XOM", "CVX", "COP", "SLB", "EOG", "PXD", "DVN", "APA", "OXY", "HAL",
+    "JNJ", "PFE", "ABBV", "LLY", "UNH", "CVS", "HUM", "CNC", "ELV", "CI",
+    "WMT", "TGT", "HD", "LOW", "NKE", "DIS", "SBUX", "KO", "PEP", "MCD",
+    "BA", "GE", "CAT", "DE", "HON", "RTX", "LMT", "NOC", "GD", "EMR",
 ]
+FALLBACK_SYMBOL_POOL_TARGET = 420
+FALLBACK_SYNTHETIC_PREFIX = "ZZ"
+UNIVERSE_METADATA_CACHE_FILE = "universe_metadata_cache.json"
+UNIVERSE_METADATA_CACHE_TTL_SECONDS = max(300, int(os.getenv("DPOLARIS_UNIVERSE_METADATA_TTL_SECONDS", str(12 * 3600))))
+UNIVERSE_METADATA_REFRESH_LIMIT = max(0, int(os.getenv("DPOLARIS_UNIVERSE_METADATA_REFRESH_LIMIT", "40")))
 
 SECTOR_ETF_MAP = {
     "basic materials": "XLB",
@@ -583,10 +620,20 @@ def _repo_root() -> Path:
 
 
 def _universe_root() -> Path:
-    raw = os.getenv("DPOLARIS_UNIVERSE_DIR", "universe")
-    path = Path(raw).expanduser()
-    if not path.is_absolute():
-        path = _repo_root() / path
+    raw = os.getenv("DPOLARIS_UNIVERSE_DIR", "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = _repo_root() / path
+        return path
+
+    if config is not None and getattr(config, "data_dir", None) is not None:
+        try:
+            return Path(config.data_dir).expanduser() / "universe"
+        except Exception:
+            pass
+
+    path = Path("~/dpolaris_data/universe").expanduser()
     return path
 
 
@@ -704,9 +751,11 @@ def _build_analysis_payload(
     source: str,
     run_id: Optional[str],
 ) -> dict[str, Any]:
+    created_at = report.get("created_at") or utc_now_iso()
     return {
         "ticker": symbol,
-        "created_at": report.get("created_at") or utc_now_iso(),
+        "created_at": created_at,
+        "analysis_date": created_at,
         "model_type": model_type or "none",
         "training_window": _training_window_from_history(history_df),
         "device": device or "cpu",
@@ -849,14 +898,83 @@ def _universe_with_hash(payload: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
-def _fallback_symbols() -> list[str]:
+def _dedupe_symbols(items: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in items:
+        symbol = _sanitize_symbol(raw)
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append(symbol)
+    return out
+
+
+def _symbols_from_universe_payload(payload: dict[str, Any]) -> list[str]:
+    symbols: list[str] = []
+    for key in (
+        "tickers",
+        "merged",
+        "nasdaq300",
+        "wsb100",
+        "nasdaq_top_500",
+        "wsb_top_500",
+        "items",
+        "rows",
+        "data",
+    ):
+        value = payload.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if isinstance(item, str):
+                symbols.append(item)
+                continue
+            if isinstance(item, dict):
+                symbol = item.get("symbol") or item.get("ticker")
+                if symbol:
+                    symbols.append(str(symbol))
+    return _dedupe_symbols(symbols)
+
+
+def _existing_universe_symbols() -> list[str]:
+    universe_dir = _universe_root()
+    paths = [
+        universe_dir / "nasdaq300.json",
+        universe_dir / "wsb100.json",
+        universe_dir / "combined400.json",
+        universe_dir / "combined.json",
+        universe_dir / "nasdaq_top_500.json",
+        universe_dir / "wsb_top_500.json",
+        universe_dir / "combined_1000.json",
+    ]
+    collected: list[str] = []
+    for path in paths:
+        payload = _json_load(path)
+        if not isinstance(payload, dict):
+            continue
+        collected.extend(_symbols_from_universe_payload(payload))
+    return _dedupe_symbols(collected)
+
+
+def _with_synthetic_tail(symbols: list[str], minimum: int) -> list[str]:
+    target = max(1, int(minimum))
+    out = list(symbols)
+    next_id = 1
+    while len(out) < target:
+        out.append(f"{FALLBACK_SYNTHETIC_PREFIX}{next_id:04d}")
+        next_id += 1
+    return out
+
+
+def _fallback_symbols(minimum: int = FALLBACK_SYMBOL_POOL_TARGET) -> list[str]:
     raw = os.getenv("DPOLARIS_FALLBACK_SYMBOLS", "")
+    env_symbols: list[str] = []
     if raw.strip():
-        parsed = [_sanitize_symbol(x) for x in raw.split(",")]
-        cleaned = [x for x in parsed if x]
-        if cleaned:
-            return cleaned
-    return list(FALLBACK_UNIVERSE_SYMBOLS)
+        env_symbols = _dedupe_symbols([x for x in raw.split(",") if x.strip()])
+
+    base = env_symbols if env_symbols else _dedupe_symbols(_existing_universe_symbols() + FALLBACK_UNIVERSE_SYMBOLS)
+    return _with_synthetic_tail(base, minimum)
 
 
 def _build_fallback_nasdaq_payload(symbols: list[str], *, top_n: int = 300) -> dict[str, Any]:
@@ -865,9 +983,13 @@ def _build_fallback_nasdaq_payload(symbols: list[str], *, top_n: int = 300) -> d
     rows = [
         {
             "symbol": symbol,
+            "name": symbol,
             "company_name": symbol,
             "market_cap": None,
+            "avg_volume_7d": None,
             "avg_dollar_volume": None,
+            "change_pct_1d": None,
+            "change_percent_1d": None,
             "sector": None,
             "industry": None,
         }
@@ -914,6 +1036,12 @@ def _build_fallback_wsb_payload(symbols: list[str], *, top_n: int = 100) -> dict
         rows.append(
             {
                 "symbol": symbol,
+                "name": symbol,
+                "company_name": symbol,
+                "sector": None,
+                "market_cap": None,
+                "avg_volume_7d": None,
+                "change_pct_1d": None,
                 "mention_count": mentions,
                 "mention_velocity": round(float(mentions) / 7.0, 6),
                 "sentiment_score": 0.0,
@@ -966,9 +1094,21 @@ def _build_fallback_combined_payload(
             continue
         merged[symbol] = {
             "symbol": symbol,
+            "name": row.get("name") or row.get("company_name") or symbol,
             "company_name": row.get("company_name") or symbol,
             "market_cap": row.get("market_cap"),
+            "avg_volume_7d": row.get("avg_volume_7d"),
             "avg_dollar_volume": row.get("avg_dollar_volume"),
+            "change_pct_1d": (
+                row.get("change_pct_1d")
+                if row.get("change_pct_1d") is not None
+                else row.get("change_percent_1d")
+            ),
+            "change_percent_1d": (
+                row.get("change_percent_1d")
+                if row.get("change_percent_1d") is not None
+                else row.get("change_pct_1d")
+            ),
             "sector": row.get("sector"),
             "industry": row.get("industry"),
             "mention_count": 0,
@@ -984,9 +1124,13 @@ def _build_fallback_combined_payload(
             symbol,
             {
                 "symbol": symbol,
+                "name": symbol,
                 "company_name": symbol,
                 "market_cap": None,
+                "avg_volume_7d": None,
                 "avg_dollar_volume": None,
+                "change_pct_1d": None,
+                "change_percent_1d": None,
                 "sector": None,
                 "industry": None,
                 "mention_count": 0,
@@ -1014,7 +1158,7 @@ def _build_fallback_combined_payload(
     )[: max(1, int(top_n))]
 
     payload = {
-        "name": "combined",
+        "name": "combined400",
         "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
         "generated_at": generated_at,
         "updated_at": generated_at,
@@ -1061,7 +1205,8 @@ def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
     symbols = _fallback_symbols()
     nasdaq_path = universe_dir / "nasdaq300.json"
     wsb_path = universe_dir / "wsb100.json"
-    combined_path = universe_dir / "combined.json"
+    combined_path = universe_dir / "combined400.json"
+    legacy_combined_path = universe_dir / "combined.json"
 
     if canonical == "nasdaq300":
         _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols, top_n=300))
@@ -1083,7 +1228,9 @@ def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
 
     ns_payload = _json_load(ns_existing) or _build_fallback_nasdaq_payload(symbols, top_n=300)
     ws_payload = _json_load(ws_existing) or _build_fallback_wsb_payload(symbols, top_n=100)
-    _json_dump(combined_path, _build_fallback_combined_payload(ns_payload, ws_payload, top_n=400))
+    combined_payload = _build_fallback_combined_payload(ns_payload, ws_payload, top_n=400)
+    _json_dump(combined_path, combined_payload)
+    _json_dump(legacy_combined_path, combined_payload)
     return combined_path
 
 
@@ -1124,9 +1271,257 @@ def _resolve_universe_path(universe_name: str) -> Path:
     raise FileNotFoundError(f"Universe file not found for '{universe_name}'")
 
 
+def _universe_metadata_cache_path() -> Path:
+    return _analysis_data_dir() / "cache" / UNIVERSE_METADATA_CACHE_FILE
+
+
+def _load_universe_metadata_cache() -> dict[str, dict[str, Any]]:
+    path = _universe_metadata_cache_path()
+    payload = _json_load(path)
+    if not isinstance(payload, dict):
+        return {}
+
+    out: dict[str, dict[str, Any]] = {}
+    for key, value in payload.items():
+        if not isinstance(value, dict):
+            continue
+        symbol = _sanitize_symbol(key)
+        if symbol:
+            out[symbol] = value
+    return out
+
+
+def _save_universe_metadata_cache(payload: dict[str, dict[str, Any]]) -> None:
+    try:
+        _json_dump(_universe_metadata_cache_path(), payload)
+    except Exception:
+        logger.debug("Failed to persist universe metadata cache", exc_info=True)
+
+
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if not np.isfinite(number):
+        return None
+    return float(number)
+
+
+def _coerce_optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _name_is_placeholder(name: Any, symbol: str) -> bool:
+    text = str(name or "").strip()
+    if not text:
+        return True
+    normalized = text.upper()
+    return normalized in {symbol.upper(), "—", "-"}
+
+
+def _is_synthetic_fallback_symbol(symbol: str) -> bool:
+    normalized = (symbol or "").strip().upper()
+    if not normalized.startswith(FALLBACK_SYNTHETIC_PREFIX):
+        return False
+    suffix = normalized[len(FALLBACK_SYNTHETIC_PREFIX):]
+    return bool(suffix) and suffix.isdigit()
+
+
+def _row_needs_metadata(row: dict[str, Any]) -> bool:
+    symbol = str(row.get("symbol") or "").strip().upper()
+    if not symbol:
+        return False
+    if _is_synthetic_fallback_symbol(symbol):
+        return False
+    if _name_is_placeholder(row.get("name"), symbol):
+        return True
+    if _name_is_placeholder(row.get("company_name"), symbol):
+        return True
+    if not str(row.get("sector") or "").strip():
+        return True
+    if _coerce_optional_float(row.get("market_cap")) is None:
+        return True
+    if _coerce_optional_float(row.get("avg_volume_7d")) is None:
+        return True
+    return _coerce_optional_float(row.get("change_pct_1d")) is None
+
+
+def _cached_metadata_entry(cache: dict[str, dict[str, Any]], symbol: str) -> Optional[dict[str, Any]]:
+    entry = cache.get(symbol.upper())
+    if not isinstance(entry, dict):
+        return None
+
+    cached_at = _parse_timestamp(entry.get("cached_at"))
+    if cached_at is None:
+        return None
+    age_seconds = (datetime.utcnow() - cached_at).total_seconds()
+    if age_seconds > UNIVERSE_METADATA_CACHE_TTL_SECONDS:
+        return None
+
+    data = entry.get("data")
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _normalize_metadata_payload(symbol: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "symbol": symbol.upper(),
+        "name": payload.get("name") or payload.get("company_name"),
+        "sector": payload.get("sector"),
+        "market_cap": _coerce_optional_float(payload.get("market_cap")),
+        "avg_volume_7d": _coerce_optional_float(payload.get("avg_volume_7d")),
+        "change_pct_1d": _coerce_optional_float(
+            payload.get("change_pct_1d")
+            if payload.get("change_pct_1d") is not None
+            else payload.get("change_percent_1d")
+        ),
+    }
+
+
+def _fetch_universe_symbol_metadata(symbol: str) -> dict[str, Any]:
+    try:
+        import yfinance  # noqa: F401
+    except Exception:
+        return {}
+
+    try:
+        payload = _fetch_single_stock_metadata(symbol)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return _normalize_metadata_payload(symbol, payload)
+
+
+def _apply_metadata_to_row(row: dict[str, Any], metadata: dict[str, Any]) -> None:
+    symbol = str(row.get("symbol") or "").strip().upper()
+    if not symbol:
+        return
+
+    candidate_name = metadata.get("name")
+    if candidate_name and _name_is_placeholder(row.get("name"), symbol):
+        row["name"] = str(candidate_name)
+    if candidate_name and _name_is_placeholder(row.get("company_name"), symbol):
+        row["company_name"] = str(candidate_name)
+
+    if metadata.get("sector") and not str(row.get("sector") or "").strip():
+        row["sector"] = metadata.get("sector")
+
+    if _coerce_optional_float(row.get("market_cap")) is None and metadata.get("market_cap") is not None:
+        row["market_cap"] = _coerce_optional_float(metadata.get("market_cap"))
+
+    if _coerce_optional_float(row.get("avg_volume_7d")) is None and metadata.get("avg_volume_7d") is not None:
+        avg_volume = _coerce_optional_float(metadata.get("avg_volume_7d"))
+        row["avg_volume_7d"] = avg_volume
+        if _coerce_optional_float(row.get("avg_dollar_volume")) is None:
+            row["avg_dollar_volume"] = avg_volume
+
+    if _coerce_optional_float(row.get("change_pct_1d")) is None and metadata.get("change_pct_1d") is not None:
+        change = _coerce_optional_float(metadata.get("change_pct_1d"))
+        row["change_pct_1d"] = change
+        row["change_percent_1d"] = change
+
+
+def _enrich_universe_rows_with_metadata(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return rows
+
+    cache = _load_universe_metadata_cache()
+    cache_dirty = False
+
+    row_by_symbol: dict[str, dict[str, Any]] = {}
+    refresh_candidates: list[str] = []
+
+    for row in rows:
+        symbol = _sanitize_symbol(row.get("symbol"))
+        if not symbol:
+            continue
+        row_by_symbol[symbol] = row
+        cached = _cached_metadata_entry(cache, symbol)
+        skip_refresh = False
+        if cached is not None:
+            if cached.get("_missing"):
+                skip_refresh = True
+            else:
+                _apply_metadata_to_row(row, cached)
+        if not skip_refresh and _row_needs_metadata(row):
+            refresh_candidates.append(symbol)
+
+    refresh_limit = max(0, UNIVERSE_METADATA_REFRESH_LIMIT)
+    for symbol in refresh_candidates[:refresh_limit]:
+        metadata = _fetch_universe_symbol_metadata(symbol)
+        if not metadata:
+            cache[symbol] = {
+                "cached_at": utc_now_iso(),
+                "data": {"_missing": True},
+            }
+            cache_dirty = True
+            continue
+        row = row_by_symbol.get(symbol)
+        if row is None:
+            continue
+        _apply_metadata_to_row(row, metadata)
+        cache[symbol] = {
+            "cached_at": utc_now_iso(),
+            "data": metadata,
+        }
+        cache_dirty = True
+
+    if cache_dirty:
+        _save_universe_metadata_cache(cache)
+
+    analysis_dates = _latest_analysis_dates_by_symbol(limit=5000)
+    if analysis_dates:
+        for row in rows:
+            symbol = _sanitize_symbol(row.get("symbol"))
+            if not symbol:
+                continue
+            date_text = analysis_dates.get(symbol)
+            if date_text:
+                row["analysis_date"] = date_text
+
+    return rows
+
+
+def _latest_analysis_dates_by_symbol(limit: int = 5000) -> dict[str, str]:
+    if list_analysis_artifacts_store is None:
+        return {}
+    try:
+        items = list_analysis_artifacts_store(data_dir=_analysis_data_dir(), limit=max(1, int(limit)))
+    except Exception:
+        return {}
+    if not isinstance(items, list):
+        return {}
+
+    out: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        symbol = _sanitize_symbol(item.get("ticker") or item.get("symbol"))
+        if not symbol or symbol in out:
+            continue
+        analysis_date = item.get("analysis_date") or item.get("created_at")
+        if analysis_date:
+            out[symbol] = str(analysis_date)
+    return out
+
+
 def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[str, Any]], Path]:
     path = _resolve_universe_path(universe_name)
-    canonical_name = _canonical_universe_name(universe_name) or Path(path).stem
+    canonical_name = (
+        _canonical_universe_name(universe_name)
+        or _canonical_universe_name(Path(path).stem)
+        or Path(path).stem
+    )
     payload = _json_load(path)
     if payload is None:
         raise ValueError(f"Invalid universe JSON: {path}")
@@ -1144,7 +1539,7 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
             + (payload.get("wsb_top_500") or [])
         )
 
-    if canonical_name == "combined" and not rows:
+    if canonical_name == "combined400" and not rows:
         ns_payload, ns_rows, _ = _load_scan_universe("nasdaq300")
         ws_payload, ws_rows, _ = _load_scan_universe("wsb100")
         payload = _build_fallback_combined_payload(
@@ -1165,11 +1560,16 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
             normalized.append(
                 {
                     "symbol": symbol,
+                    "name": symbol,
                     "company_name": symbol,
                     "sector": None,
                     "industry": None,
                     "market_cap": None,
+                    "avg_volume_7d": None,
                     "avg_dollar_volume": None,
+                    "change_pct_1d": None,
+                    "change_percent_1d": None,
+                    "analysis_date": None,
                     "mention_count": None,
                     "mention_velocity": None,
                 }
@@ -1178,18 +1578,39 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
 
         if not isinstance(raw, dict):
             continue
-        symbol = _sanitize_symbol(raw.get("symbol"))
+        symbol = _sanitize_symbol(raw.get("symbol") or raw.get("ticker"))
         if not symbol or symbol in seen:
             continue
         seen.add(symbol)
         normalized.append(
             {
                 "symbol": symbol,
+                "name": raw.get("name") or raw.get("company_name") or symbol,
                 "company_name": raw.get("company_name") or raw.get("name") or symbol,
                 "sector": raw.get("sector"),
                 "industry": raw.get("industry"),
                 "market_cap": raw.get("market_cap"),
-                "avg_dollar_volume": raw.get("avg_dollar_volume"),
+                "avg_volume_7d": (
+                    raw.get("avg_volume_7d")
+                    if raw.get("avg_volume_7d") is not None
+                    else (
+                        raw.get("average_volume_7d")
+                        if raw.get("average_volume_7d") is not None
+                        else raw.get("avg_dollar_volume")
+                    )
+                ),
+                "avg_dollar_volume": raw.get("avg_dollar_volume") if raw.get("avg_dollar_volume") is not None else raw.get("avg_volume_7d"),
+                "change_pct_1d": (
+                    raw.get("change_pct_1d")
+                    if raw.get("change_pct_1d") is not None
+                    else raw.get("change_percent_1d")
+                ),
+                "change_percent_1d": (
+                    raw.get("change_percent_1d")
+                    if raw.get("change_percent_1d") is not None
+                    else raw.get("change_pct_1d")
+                ),
+                "analysis_date": raw.get("analysis_date"),
                 "mention_count": raw.get("mention_count"),
                 "mention_velocity": raw.get("mention_velocity"),
             }
@@ -1197,6 +1618,7 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
 
     if not normalized:
         raise ValueError(f"No tickers found in universe: {path}")
+    normalized = _enrich_universe_rows_with_metadata(normalized)
     payload["name"] = canonical_name
     if "updated_at" not in payload:
         payload["updated_at"] = payload.get("generated_at")
@@ -2999,7 +3421,7 @@ class DeepLearningTrainJobRequest(BaseModel):
 
 
 class ScanStartRequest(BaseModel):
-    universe: str = Field(default="combined")
+    universe: str = Field(default="combined400")
     run_mode: str = Field(default="scan", alias="runMode")
     horizon_config: dict[str, Any] = Field(default_factory=dict, alias="horizonConfig")
     options_mode: bool = Field(default=False, alias="optionsMode")
@@ -3902,6 +4324,245 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
     return rows[: max(1, int(limit))]
 
 
+def _int_env(name: str, default: int) -> int:
+    raw = str(os.getenv(name, str(default)) or "").strip()
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _enforce_wsb_min_mentions(
+    payload: dict[str, Any],
+    *,
+    min_mentions: int,
+    top_n: int,
+    fallback_symbols: list[str],
+) -> dict[str, Any]:
+    rows = list(payload.get("tickers") or [])
+    filtered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = _sanitize_symbol(row.get("symbol"))
+        if not symbol or symbol in seen:
+            continue
+        mentions = _coerce_optional_int(row.get("mention_count")) or 0
+        if mentions < min_mentions:
+            continue
+        seen.add(symbol)
+        clean = dict(row)
+        clean["symbol"] = symbol
+        clean["mention_count"] = mentions
+        clean.setdefault("name", symbol)
+        clean.setdefault("company_name", symbol)
+        clean.setdefault("sector", None)
+        clean.setdefault("market_cap", None)
+        clean.setdefault("avg_volume_7d", None)
+        clean.setdefault("change_pct_1d", None)
+        filtered.append(clean)
+
+    for symbol in fallback_symbols:
+        safe_symbol = _sanitize_symbol(symbol)
+        if not safe_symbol or safe_symbol in seen:
+            continue
+        seen.add(safe_symbol)
+        filtered.append(
+            {
+                "symbol": safe_symbol,
+                "name": safe_symbol,
+                "company_name": safe_symbol,
+                "sector": None,
+                "market_cap": None,
+                "avg_volume_7d": None,
+                "change_pct_1d": None,
+                "mention_count": 0,
+                "mention_velocity": 0.0,
+                "sentiment_score": 0.0,
+                "example_post_ids": [],
+                "example_titles": [],
+            }
+        )
+        if len(filtered) >= max(1, int(top_n)):
+            break
+
+    payload["tickers"] = filtered[: max(1, int(top_n))]
+    criteria = dict(payload.get("criteria") or {})
+    criteria["top_n_requested"] = int(top_n)
+    criteria["top_n_returned"] = len(payload["tickers"])
+    criteria["min_mentions"] = int(min_mentions)
+    payload["criteria"] = criteria
+
+    notes = list(payload.get("notes") or [])
+    if len(filtered) < top_n:
+        notes.append("WSB mention rows below target; filled with fallback symbols at mention_count=0.")
+    payload["notes"] = notes
+    return payload
+
+
+def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
+    universe_dir = _universe_root()
+    universe_dir.mkdir(parents=True, exist_ok=True)
+
+    if build_nasdaq_top_500 is None or build_wsb_top_500 is None or build_combined_universe is None:
+        warnings = ["Universe builder dependency unavailable; generated deterministic fallback payloads."]
+        symbols = _fallback_symbols()
+        nasdaq_payload = _build_fallback_nasdaq_payload(symbols, top_n=300)
+        wsb_payload = _build_fallback_wsb_payload(symbols, top_n=100)
+        combined_payload = _build_fallback_combined_payload(nasdaq_payload, wsb_payload, top_n=400)
+        _json_dump(universe_dir / "nasdaq300.json", nasdaq_payload)
+        _json_dump(universe_dir / "wsb100.json", wsb_payload)
+        _json_dump(universe_dir / "combined400.json", combined_payload)
+        _json_dump(universe_dir / "combined.json", combined_payload)
+        return {
+            "status": "ok",
+            "warnings": warnings,
+            "universes": {
+                "nasdaq300": {"count": len(nasdaq_payload.get("tickers") or [])},
+                "wsb100": {"count": len(wsb_payload.get("tickers") or [])},
+                "combined400": {"count": len(combined_payload.get("tickers") or [])},
+            },
+            "generated_at": utc_now_iso(),
+        }
+
+    warnings: list[str] = []
+    cache = _load_universe_metadata_cache()
+    cache_dirty = False
+
+    def profile_fetcher(symbol: str) -> dict[str, Any]:
+        nonlocal cache_dirty
+        safe_symbol = _sanitize_symbol(symbol) or symbol.upper()
+        cached = _cached_metadata_entry(cache, safe_symbol)
+        if cached:
+            metadata = cached
+        else:
+            metadata = _fetch_universe_symbol_metadata(safe_symbol)
+            if metadata:
+                cache[safe_symbol] = {
+                    "cached_at": utc_now_iso(),
+                    "data": metadata,
+                }
+                cache_dirty = True
+
+        return {
+            "symbol": safe_symbol,
+            "company_name": metadata.get("name") or safe_symbol,
+            "market_cap": metadata.get("market_cap"),
+            # Use avg volume as a liquidity proxy when dollar volume is unavailable.
+            "avg_dollar_volume": metadata.get("avg_volume_7d"),
+            "sector": metadata.get("sector"),
+            "industry": None,
+        }
+
+    nasdaq_path = universe_dir / "nasdaq300.json"
+    wsb_path = universe_dir / "wsb100.json"
+    combined_path = universe_dir / "combined400.json"
+    combined_legacy_path = universe_dir / "combined.json"
+
+    nasdaq_payload = build_nasdaq_top_500(
+        output_path=nasdaq_path,
+        top_n=300,
+        min_avg_dollar_volume=0.0,
+        candidate_limit=max(320, _int_env("DPOLARIS_NASDAQ_CANDIDATE_LIMIT", 340)),
+        profile_fetcher=profile_fetcher,
+    )
+    nasdaq_payload["name"] = "nasdaq300"
+    nasdaq_payload["updated_at"] = utc_now_iso()
+    nasdaq_payload = _universe_with_hash(nasdaq_payload)
+    _json_dump(nasdaq_path, nasdaq_payload)
+
+    valid_tickers = {
+        _sanitize_symbol((row or {}).get("symbol"))
+        for row in (nasdaq_payload.get("tickers") or [])
+        if isinstance(row, dict)
+    }
+    valid_tickers = {x for x in valid_tickers if x}
+
+    provider_name = "cache"
+    if build_mentions_provider is not None:
+        mentions_provider, mentions_context = build_mentions_provider(_analysis_data_dir())
+        provider_name = mentions_context.provider_name
+        warnings.extend(list(mentions_context.warnings or []))
+    else:
+        mentions_provider = None
+        warnings.append("Mentions provider dependency unavailable; using fallback WSB symbols.")
+
+    def post_fetcher(*, window_start: datetime, window_end: datetime, max_posts: int = 4000) -> tuple[list[dict[str, Any]], str, list[str]]:
+        local_notes = list(warnings)
+        if mentions_provider is None:
+            return [], provider_name, local_notes
+        try:
+            posts = mentions_provider.fetch_posts(window_start=window_start, window_end=window_end, max_posts=max_posts)
+            return posts, provider_name, local_notes
+        except Exception as exc:
+            local_notes.append(f"mentions fetch failed: {exc}")
+            return [], provider_name, local_notes
+
+    wsb_payload = build_wsb_top_500(
+        output_path=wsb_path,
+        top_n=100,
+        window_days=max(1, _int_env("DPOLARIS_WSB_WINDOW_DAYS", 1)),
+        post_fetcher=post_fetcher,
+        valid_tickers=valid_tickers,
+    )
+    wsb_payload["name"] = "wsb100"
+    wsb_payload["updated_at"] = utc_now_iso()
+    wsb_payload = _enforce_wsb_min_mentions(
+        wsb_payload,
+        min_mentions=max(0, _int_env("DPOLARIS_WSB_MIN_MENTIONS", 2)),
+        top_n=100,
+        fallback_symbols=[str(x.get("symbol")) for x in (nasdaq_payload.get("tickers") or []) if isinstance(x, dict)],
+    )
+    wsb_payload = _universe_with_hash(wsb_payload)
+    _json_dump(wsb_path, wsb_payload)
+
+    combined_payload = build_combined_universe(
+        output_path=combined_path,
+        nasdaq_payload=nasdaq_payload,
+        wsb_payload=wsb_payload,
+        top_n=400,
+    )
+    combined_payload["name"] = "combined400"
+    combined_payload["updated_at"] = utc_now_iso()
+    merged_rows = list(combined_payload.get("merged") or [])
+    combined_payload["tickers"] = merged_rows[:400]
+    combined_payload = _universe_with_hash(combined_payload)
+    _json_dump(combined_path, combined_payload)
+    _json_dump(combined_legacy_path, combined_payload)
+
+    if cache_dirty:
+        _save_universe_metadata_cache(cache)
+
+    return {
+        "status": "ok",
+        "warnings": warnings,
+        "provider_status": {
+            "mentions": provider_name,
+        },
+        "universes": {
+            "nasdaq300": {
+                "path": str(nasdaq_path),
+                "count": len(nasdaq_payload.get("tickers") or []),
+                "universe_hash": nasdaq_payload.get("universe_hash"),
+            },
+            "wsb100": {
+                "path": str(wsb_path),
+                "count": len(wsb_payload.get("tickers") or []),
+                "universe_hash": wsb_payload.get("universe_hash"),
+            },
+            "combined400": {
+                "path": str(combined_path),
+                "count": len(combined_payload.get("tickers") or []),
+                "universe_hash": combined_payload.get("universe_hash"),
+            },
+        },
+        "generated_at": utc_now_iso(),
+        "force": bool(force),
+    }
+
+
 def _list_available_universes() -> list[dict[str, Any]]:
     """List canonical universe definitions with metadata."""
     universes: list[dict[str, Any]] = []
@@ -3909,14 +4570,21 @@ def _list_available_universes() -> list[dict[str, Any]]:
     for name in UNIVERSE_CANONICAL_NAMES:
         _ensure_default_universe_file(name)
         try:
-            payload, rows, path = _load_scan_universe(name)
+            path = _resolve_universe_path(name)
+            payload = _json_load(path) or {}
+            rows_obj = payload.get("tickers")
+            if not isinstance(rows_obj, list):
+                rows_obj = payload.get("merged")
+            if not isinstance(rows_obj, list):
+                rows_obj = []
+            row_count = len(rows_obj)
         except Exception:
             continue
         universes.append(
             {
                 "name": name,
                 "path": str(path),
-                "ticker_count": len(rows),
+                "ticker_count": row_count,
                 "schema_version": payload.get("schema_version"),
                 "generated_at": payload.get("generated_at"),
                 "updated_at": payload.get("updated_at") or payload.get("generated_at"),
@@ -3930,7 +4598,27 @@ def _list_available_universes() -> list[dict[str, Any]]:
 @app.get("/api/universe/list")
 async def list_universe_names():
     """Return canonical universe names for control-center clients."""
-    return [item["name"] for item in _list_available_universes()]
+    names = [item["name"] for item in _list_available_universes()]
+    for canonical in UNIVERSE_CANONICAL_NAMES:
+        if canonical not in names:
+            names.append(canonical)
+    return names
+
+
+@app.post("/api/universe/rebuild")
+async def rebuild_universes_endpoint(force: bool = Query(False)):
+    """Rebuild NASDAQ/WSB/combined universes and persist under runtime data dir."""
+    try:
+        result = await asyncio.to_thread(_rebuild_universe_payloads, force)
+        return result
+    except Exception as exc:
+        logger.exception("Universe rebuild failed")
+        return {
+            "status": "error",
+            "detail": str(exc),
+            "warnings": ["Universe rebuild failed; existing universe files were kept."],
+            "generated_at": utc_now_iso(),
+        }
 
 
 @app.get("/universe/list")
@@ -3954,6 +4642,9 @@ async def get_scan_universe_by_name(name: str = Query(..., min_length=1)):
 @app.get("/universe/{universe_name}")
 @app.get("/api/universe/{universe_name}")
 async def get_scan_universe(universe_name: str):
+    if _normalize_universe_key(universe_name) in {"list", "names"}:
+        return await list_universe_names()
+
     try:
         payload, rows, path = _load_scan_universe(universe_name)
     except FileNotFoundError as exc:
@@ -3961,7 +4652,22 @@ async def get_scan_universe(universe_name: str):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    canonical_name = _canonical_universe_name(universe_name) or universe_name
+    canonical_name = (
+        _canonical_universe_name(universe_name)
+        or _canonical_universe_name(payload.get("name"))
+        or _canonical_universe_name(Path(path).stem)
+        or universe_name
+    )
+    response_rows: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        row["name"] = row.get("name") or row.get("company_name") or row.get("symbol")
+        row["mentions"] = row.get("mentions") if row.get("mentions") is not None else row.get("mention_count")
+        row.setdefault("avg_volume_7d", row.get("avg_dollar_volume"))
+        row.setdefault("change_pct_1d", row.get("change_percent_1d"))
+        row.setdefault("analysis_date", None)
+        response_rows.append(row)
+
     response = {
         "name": canonical_name,
         "requested_name": universe_name,
@@ -3970,8 +4676,8 @@ async def get_scan_universe(universe_name: str):
         "updated_at": payload.get("updated_at") or payload.get("generated_at"),
         "universe_hash": payload.get("universe_hash"),
         "schema_version": payload.get("schema_version"),
-        "count": len(rows),
-        "tickers": rows,
+        "count": len(response_rows),
+        "tickers": response_rows,
         "universe": payload,
     }
     return response
@@ -5185,6 +5891,60 @@ async def generate_trade_setup(symbol: str, horizon_days: int = Query(5, ge=1, l
 
 
 # --- News & Sentiment ---
+@app.get("/api/news/{symbol}")
+async def get_symbol_news(
+    symbol: str,
+    limit: int = Query(20, ge=1, le=100),
+    force: bool = Query(False),
+):
+    """Return recent headline items for one ticker with resilient provider fallbacks."""
+    normalized = _sanitize_symbol(symbol)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+
+    if fetch_news_with_cache is None:
+        return {
+            "symbol": normalized,
+            "provider": "disabled",
+            "count": 0,
+            "items": [],
+            "warnings": ["News provider module unavailable; returning empty list."],
+            "cached": False,
+            "updated_at": utc_now_iso(),
+        }
+
+    try:
+        items, context, meta = await asyncio.to_thread(
+            fetch_news_with_cache,
+            symbol=normalized,
+            limit=limit,
+            data_dir=_analysis_data_dir(),
+            force_refresh=bool(force),
+        )
+        return {
+            "symbol": normalized,
+            "provider": context.provider_name,
+            "count": len(items),
+            "items": items,
+            "warnings": list(context.warnings or []),
+            "cached": bool(meta.get("cached")),
+            "cache_path": meta.get("cache_path"),
+            "updated_at": utc_now_iso(),
+        }
+    except Exception as exc:
+        logger.exception("News fetch failed for %s", normalized)
+        return {
+            "symbol": normalized,
+            "provider": "error",
+            "count": 0,
+            "items": [],
+            "warnings": ["News fetch failed; returning empty list."],
+            "detail": str(exc),
+            "cached": False,
+            "updated_at": utc_now_iso(),
+        }
+
+
 @app.get("/api/news/sentiment")
 async def get_news_sentiment(symbols: Optional[str] = None):
     """Get news sentiment for symbols"""
@@ -5205,7 +5965,13 @@ async def get_news_sentiment(symbols: Optional[str] = None):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "market_sentiment": {"status": "unavailable"},
+            "top_movers": [],
+            "symbols": {},
+            "warnings": ["News sentiment unavailable; optional dependencies may be missing."],
+            "detail": str(e),
+        }
 
 
 @app.get("/api/news/sentiment/{symbol}")
@@ -5228,7 +5994,12 @@ async def get_symbol_sentiment(symbol: str):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "symbol": symbol.upper(),
+            "sentiment": None,
+            "warnings": ["News sentiment unavailable; optional dependencies may be missing."],
+            "detail": str(e),
+        }
 
 
 @app.get("/api/news/articles")
@@ -5245,7 +6016,12 @@ async def get_news_articles(limit: int = 20):
         return {"articles": articles, "count": len(articles)}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "articles": [],
+            "count": 0,
+            "warnings": ["News articles unavailable; optional dependencies may be missing."],
+            "detail": str(e),
+        }
 
 
 # --- Scheduler ---
@@ -5751,7 +6527,14 @@ async def get_analysis_artifact_endpoint(analysis_id: str):
     if load_analysis_artifact_store is None:
         raise HTTPException(status_code=503, detail="Analysis artifact store unavailable")
     try:
-        return load_analysis_artifact_store(analysis_id, data_dir=_analysis_data_dir())
+        artifact = load_analysis_artifact_store(analysis_id, data_dir=_analysis_data_dir())
+        if isinstance(artifact, dict):
+            analysis_root = _analysis_data_dir() / "analysis"
+            artifact.setdefault("path", str((analysis_root / f"{analysis_id}.json").expanduser()))
+            artifact.setdefault("analysis_date", artifact.get("created_at"))
+            if artifact.get("ticker") and artifact.get("symbol") is None:
+                artifact["symbol"] = artifact.get("ticker")
+        return artifact
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Analysis artifact not found: {analysis_id}")
     except Exception as exc:

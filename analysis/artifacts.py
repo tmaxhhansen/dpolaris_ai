@@ -43,16 +43,43 @@ def _build_default_id(ticker: str) -> str:
     return f"analysis_{ticker.lower()}_{stamp}_{uuid4().hex[:8]}"
 
 
-def _summary_view(payload: dict[str, Any]) -> dict[str, Any]:
+def _extract_confidence(payload: dict[str, Any]) -> Optional[float]:
+    signals = payload.get("signals")
+    if isinstance(signals, dict):
+        raw = signals.get("confidence")
+        try:
+            return float(raw) if raw is not None else None
+        except Exception:
+            pass
+    report = payload.get("report")
+    if isinstance(report, dict):
+        model_signals = report.get("model_signals")
+        if isinstance(model_signals, dict):
+            raw = model_signals.get("confidence")
+            try:
+                return float(raw) if raw is not None else None
+            except Exception:
+                pass
+    return None
+
+
+def _summary_view(payload: dict[str, Any], *, path: Optional[Path] = None) -> dict[str, Any]:
+    ticker = payload.get("ticker")
+    analysis_date = payload.get("analysis_date") or payload.get("created_at")
     return {
         "id": payload.get("id"),
-        "ticker": payload.get("ticker"),
+        "ticker": ticker,
+        "symbol": ticker,
         "created_at": payload.get("created_at"),
+        "analysis_date": analysis_date,
         "model_type": payload.get("model_type"),
         "device": payload.get("device"),
         "summary": payload.get("summary"),
+        "confidence": _extract_confidence(payload),
         "training_window": payload.get("training_window"),
         "source": payload.get("source"),
+        "path": str(path) if path is not None else payload.get("path"),
+        "url": payload.get("url"),
     }
 
 
@@ -72,6 +99,7 @@ def write_analysis_artifact(
     body["ticker"] = ticker
     body["id"] = _sanitize_id(str(body.get("id") or _build_default_id(ticker)))
     body["created_at"] = str(body.get("created_at") or _utc_now_iso())
+    body["analysis_date"] = str(body.get("analysis_date") or body["created_at"])
     body["summary"] = str(body.get("summary") or "")
     body["report_text"] = str(body.get("report_text") or "")
     body.setdefault("model_type", "none")
@@ -130,7 +158,7 @@ def list_analysis_artifacts(
         if ticker_filter and symbol != ticker_filter:
             continue
 
-        rows.append(_summary_view(payload))
+        rows.append(_summary_view(payload, path=path))
 
     rows.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     safe_limit = max(1, min(int(limit), 5000))
