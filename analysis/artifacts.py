@@ -38,6 +38,10 @@ def _analysis_file(root: Path, analysis_id: str) -> Path:
     return root / f"{_sanitize_id(analysis_id)}.json"
 
 
+def _analysis_index_file(root: Path) -> Path:
+    return root / "index.jsonl"
+
+
 def _build_default_id(ticker: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"analysis_{ticker.lower()}_{stamp}_{uuid4().hex[:8]}"
@@ -115,7 +119,30 @@ def write_analysis_artifact(
     root.mkdir(parents=True, exist_ok=True)
     path = _analysis_file(root, body["id"])
     path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
+    _append_analysis_index_entry(root=root, payload=body, path=path)
     return body
+
+
+def _append_analysis_index_entry(*, root: Path, payload: dict[str, Any], path: Path) -> None:
+    entry = {
+        "id": payload.get("id"),
+        "symbol": payload.get("ticker"),
+        "ticker": payload.get("ticker"),
+        "created_at": payload.get("created_at"),
+        "analysis_date": payload.get("analysis_date") or payload.get("created_at"),
+        "model_type": payload.get("model_type"),
+        "run_id": payload.get("run_id"),
+        "summary": payload.get("summary"),
+        "summary_path": str(path),
+        "full_path": str(path),
+    }
+    index_path = _analysis_index_file(root)
+    try:
+        with index_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        # Keep artifact writes resilient even if index append fails.
+        pass
 
 
 def load_analysis_artifact(

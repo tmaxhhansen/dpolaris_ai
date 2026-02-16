@@ -80,7 +80,7 @@ These provide a stable API surface for external control services.
 python scripts/smoke_control_center.py --host 127.0.0.1 --port 8420
 ```
 
-### Universe API (Nasdaq 500 / WSB 100 / Combined / Custom)
+### Universe API (Nasdaq 500 / Watchlist / Combined)
 
 Universe source of truth is filesystem JSON under:
 - `~/dpolaris_data/universe/` by default
@@ -91,31 +91,27 @@ If files are missing, deterministic defaults are generated on first request so U
 ```bash
 curl http://127.0.0.1:8420/api/universe/list
 curl http://127.0.0.1:8420/api/universe/nasdaq500
-curl http://127.0.0.1:8420/api/universe/wsb100
+curl http://127.0.0.1:8420/api/universe/watchlist
 curl http://127.0.0.1:8420/api/universe/combined
-curl http://127.0.0.1:8420/api/universe/custom
-curl -X POST 'http://127.0.0.1:8420/api/universe/custom/add' \
-  -H 'Content-Type: application/json' \
-  -d '{"symbol":"AAPL"}'
-curl -X POST 'http://127.0.0.1:8420/api/universe/custom/remove' \
-  -H 'Content-Type: application/json' \
-  -d '{"symbol":"AAPL"}'
+curl -X POST 'http://127.0.0.1:8420/api/watchlist/add?symbol=AAPL'
+curl -X POST 'http://127.0.0.1:8420/api/watchlist/remove?symbol=AAPL'
 curl -X POST 'http://127.0.0.1:8420/api/universe/rebuild?force=true'
 ```
 
 Expected:
-- `/api/universe/list` returns names including `nasdaq500`, `wsb100`, `combined`, `custom`
-- each universe endpoint returns `count > 0` and non-empty `tickers`
+- `/api/universe/list` returns names including `nasdaq500`, `watchlist`, `combined`
+- `nasdaq500` and `combined` return non-empty `tickers`; `watchlist` can be empty until user adds symbols
 - ticker rows include metadata keys for Java table rendering:
   - `symbol`, `name`, `sector`, `market_cap`, `avg_volume_7d`, `change_pct_1d`, `mentions`, `last_analysis_date`
 
 Notes:
 - NASDAQ 500 candidates are parsed from NasdaqTrader `nasdaqlisted.txt`, then ranked by market cap (yfinance metadata).
+- Watchlist source of truth is `~/dpolaris_data/watchlist.json` (user-managed, persisted across launches).
 - WSB 100 uses a mentions provider interface:
   - `PRAW` mode when `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` are configured
   - fallback cached JSON mode at `~/dpolaris_data/mentions/wsb_posts.json`
   - install optional dependency for live Reddit mode: `pip install praw`
-- Combined is a deduped union of NASDAQ + WSB + custom sets.
+- Combined is a deduped union of NASDAQ 500 + watchlist tickers.
 
 ### News API (provider fallback, no-key safe)
 

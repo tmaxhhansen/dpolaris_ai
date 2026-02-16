@@ -147,7 +147,7 @@ SCAN_INDEX_FILE = "scan_results_index.json"
 SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
-UNIVERSE_CANONICAL_NAMES = ("nasdaq500", "wsb100", "combined", "custom")
+UNIVERSE_CANONICAL_NAMES = ("nasdaq500", "watchlist", "combined", "wsb100")
 UNIVERSE_ALIAS_MAP = {
     "nasdaq500": "nasdaq500",
     "nasdaq300": "nasdaq500",
@@ -165,15 +165,18 @@ UNIVERSE_ALIAS_MAP = {
     "combined_400": "combined",
     "combined_1000": "combined",
     "combined1000": "combined",
-    "custom": "custom",
-    "customstocks": "custom",
-    "custom_stocks": "custom",
+    "watchlist": "watchlist",
+    "watch_list": "watchlist",
+    "watch": "watchlist",
+    "custom": "watchlist",
+    "customstocks": "watchlist",
+    "custom_stocks": "watchlist",
 }
 UNIVERSE_FILE_CANDIDATES = {
     "nasdaq500": ("nasdaq500.json", "nasdaq300.json", "nasdaq_top_500.json", "nasdaq_top500.json"),
     "wsb100": ("wsb100.json", "wsb_top_500.json", "wsb_top500.json"),
     "combined": ("combined.json", "combined400.json", "combined_1000.json"),
-    "custom": ("custom.json",),
+    "watchlist": ("watchlist.json", "custom.json"),
 }
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
@@ -923,6 +926,7 @@ def _symbols_from_universe_payload(payload: dict[str, Any]) -> list[str]:
         "nasdaq500",
         "nasdaq300",
         "wsb100",
+        "watchlist",
         "custom",
         "nasdaq_top_500",
         "wsb_top_500",
@@ -952,6 +956,7 @@ def _existing_universe_symbols() -> list[str]:
         universe_dir / "wsb100.json",
         universe_dir / "combined.json",
         universe_dir / "combined400.json",
+        universe_dir / "watchlist.json",
         universe_dir / "custom.json",
         universe_dir / "nasdaq_top_500.json",
         universe_dir / "wsb_top_500.json",
@@ -1092,7 +1097,7 @@ def _build_fallback_wsb_payload(symbols: list[str], *, top_n: int = 100) -> dict
 def _build_fallback_combined_payload(
     ns_payload: dict[str, Any],
     ws_payload: dict[str, Any],
-    custom_payload: Optional[dict[str, Any]] = None,
+    watchlist_payload: Optional[dict[str, Any]] = None,
     *,
     top_n: int = 700,
 ) -> dict[str, Any]:
@@ -1126,37 +1131,7 @@ def _build_fallback_combined_payload(
             "sentiment_score": None,
             "sources": ["nasdaq_top_500"],
         }
-    for row in (ws_payload.get("tickers") or []):
-        symbol = _sanitize_symbol((row or {}).get("symbol"))
-        if not symbol:
-            continue
-        item = merged.setdefault(
-            symbol,
-            {
-                "symbol": symbol,
-                "name": symbol,
-                "company_name": symbol,
-                "market_cap": None,
-                "avg_volume_7d": None,
-                "avg_dollar_volume": None,
-                "change_pct_1d": None,
-                "change_percent_1d": None,
-                "sector": None,
-                "industry": None,
-                "mention_count": 0,
-                "mention_velocity": 0.0,
-                "sentiment_score": None,
-                "sources": [],
-            },
-        )
-        item["mention_count"] = int(row.get("mention_count") or 0)
-        item["mention_velocity"] = float(row.get("mention_velocity") or 0.0)
-        if row.get("sentiment_score") is not None:
-            item["sentiment_score"] = float(row.get("sentiment_score"))
-        if "wsb_top_500" not in item["sources"]:
-            item["sources"].append("wsb_top_500")
-
-    for item in (custom_payload or {}).get("tickers") or []:
+    for item in (watchlist_payload or {}).get("tickers") or []:
         if isinstance(item, dict):
             symbol = _sanitize_symbol(item.get("symbol") or item.get("ticker"))
             row = item
@@ -1187,15 +1162,14 @@ def _build_fallback_combined_payload(
         merged_item["name"] = row.get("name") or merged_item.get("name") or symbol
         merged_item["company_name"] = row.get("company_name") or merged_item.get("company_name") or symbol
         merged_item["sector"] = row.get("sector") if row.get("sector") is not None else merged_item.get("sector")
-        if "custom" not in merged_item["sources"]:
-            merged_item["sources"].append("custom")
+        if "watchlist" not in merged_item["sources"]:
+            merged_item["sources"].append("watchlist")
 
     merged_rows = sorted(
         merged.values(),
         key=lambda x: (
             float(x.get("market_cap") or 0.0),
             float(x.get("avg_dollar_volume") or 0.0),
-            int(x.get("mention_count") or 0),
             str(x.get("symbol") or ""),
         ),
         reverse=True,
@@ -1214,15 +1188,16 @@ def _build_fallback_combined_payload(
         "data_sources": [
             {"name": "nasdaq_top_500", "count": len(ns_payload.get("tickers") or [])},
             {"name": "wsb_top_500", "count": len(ws_payload.get("tickers") or [])},
-            {"name": "custom", "count": len((custom_payload or {}).get("tickers") or [])},
+            {"name": "watchlist", "count": len((watchlist_payload or {}).get("tickers") or [])},
         ],
         "notes": [
-            "Fallback combined universe generated in API runtime due missing universe files.",
+            "Combined universe generated from NASDAQ 500 + watchlist.",
         ],
         "nasdaq500": ns_payload.get("tickers") or [],
         "nasdaq300": ns_payload.get("tickers") or [],
         "wsb100": ws_payload.get("tickers") or [],
-        "custom": (custom_payload or {}).get("tickers") or [],
+        "watchlist": (watchlist_payload or {}).get("tickers") or [],
+        "custom": (watchlist_payload or {}).get("tickers") or [],
         "nasdaq_top_500": ns_payload.get("tickers") or [],
         "wsb_top_500": ws_payload.get("tickers") or [],
         "tickers": merged_rows,
@@ -1237,51 +1212,202 @@ def _candidate_universe_paths(canonical_name: str) -> list[Path]:
     return [universe_dir / name for name in names]
 
 
+def _watchlist_store_path() -> Path:
+    return _analysis_data_dir() / "watchlist.json"
+
+
+def _watchlist_universe_path() -> Path:
+    return _universe_root() / "watchlist.json"
+
+
 def _custom_universe_path() -> Path:
+    # Legacy alias path for older clients expecting /api/universe/custom.
     return _universe_root() / "custom.json"
 
 
-def _load_custom_universe_payload() -> dict[str, Any]:
-    path = _custom_universe_path()
-    payload = _json_load(path)
-    if isinstance(payload, dict):
-        raw = payload.get("tickers")
-        tickers = raw if isinstance(raw, list) else []
-    elif isinstance(payload, list):
-        tickers = payload
-    else:
-        tickers = []
-
-    normalized: list[str] = []
-    for item in tickers:
+def _normalize_watchlist_entries(raw_entries: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw_entries if isinstance(raw_entries, list) else []:
         if isinstance(item, dict):
-            value = item.get("symbol") or item.get("ticker")
+            symbol = _sanitize_symbol(item.get("symbol") or item.get("ticker"))
+            added_at = str(item.get("added_at") or item.get("created_at") or "").strip()
         else:
-            value = item
-        if value is None:
+            symbol = _sanitize_symbol(item)
+            added_at = ""
+        if not symbol or symbol in seen:
             continue
-        normalized.append(str(value))
-    cleaned = _dedupe_symbols(normalized)
+        seen.add(symbol)
+        entries.append(
+            {
+                "symbol": symbol,
+                "added_at": added_at or utc_now_iso(),
+            }
+        )
+    return entries
+
+
+def _load_watchlist_store_payload() -> dict[str, Any]:
+    path = _watchlist_store_path()
+    payload: Any = None
+    if path.exists() and path.is_file():
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            payload = None
+    tickers_source: Any = []
+    updated_at = utc_now_iso()
+
+    if isinstance(payload, dict):
+        tickers_source = payload.get("tickers") or []
+        updated_at = str(payload.get("updated_at") or payload.get("generated_at") or updated_at)
+    elif isinstance(payload, list):
+        tickers_source = payload
+
+    entries = _normalize_watchlist_entries(tickers_source)
     body = {
-        "updated_at": (
-            payload.get("updated_at")
-            if isinstance(payload, dict) and isinstance(payload.get("updated_at"), str)
-            else utc_now_iso()
-        ),
-        "tickers": cleaned,
+        "updated_at": updated_at,
+        "tickers": entries,
     }
+
     if not path.exists():
         _json_dump(path, body)
     return body
 
 
-def _save_custom_universe_symbols(symbols: list[str]) -> dict[str, Any]:
-    body = {
+def _save_watchlist_store_entries(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    payload = {
         "updated_at": utc_now_iso(),
-        "tickers": _dedupe_symbols(symbols),
+        "tickers": _normalize_watchlist_entries(entries),
     }
-    _json_dump(_custom_universe_path(), body)
-    return body
+    _json_dump(_watchlist_store_path(), payload)
+    return payload
+
+
+def _watchlist_symbols(payload: Optional[dict[str, Any]] = None) -> list[str]:
+    source = payload or _load_watchlist_store_payload()
+    symbols: list[str] = []
+    for entry in source.get("tickers") or []:
+        if isinstance(entry, dict):
+            symbol = _sanitize_symbol(entry.get("symbol") or entry.get("ticker"))
+        else:
+            symbol = _sanitize_symbol(entry)
+        if symbol:
+            symbols.append(symbol)
+    return _dedupe_symbols(symbols)
+
+
+def _build_watchlist_universe_payload(store_payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    source = store_payload or _load_watchlist_store_payload()
+    rows: list[dict[str, Any]] = []
+    for entry in source.get("tickers") or []:
+        if isinstance(entry, dict):
+            symbol = _sanitize_symbol(entry.get("symbol") or entry.get("ticker"))
+            added_at = str(entry.get("added_at") or "").strip() or None
+        else:
+            symbol = _sanitize_symbol(entry)
+            added_at = None
+        if not symbol:
+            continue
+        rows.append(
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "company_name": symbol,
+                "sector": None,
+                "industry": None,
+                "market_cap": None,
+                "avg_volume_7d": None,
+                "avg_dollar_volume": None,
+                "change_pct_1d": None,
+                "change_percent_1d": None,
+                "analysis_date": None,
+                "last_analysis_date": None,
+                "mention_count": 0,
+                "mentions": 0,
+                "added_at": added_at,
+            }
+        )
+
+    payload = {
+        "name": "watchlist",
+        "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
+        "generated_at": utc_now_iso(),
+        "updated_at": str(source.get("updated_at") or utc_now_iso()),
+        "criteria": {
+            "source": "user_watchlist",
+            "top_n_requested": len(rows),
+            "top_n_returned": len(rows),
+        },
+        "data_sources": [
+            {
+                "name": "watchlist_store",
+                "path": str(_watchlist_store_path()),
+                "count": len(rows),
+            }
+        ],
+        "tickers": rows,
+    }
+    return _universe_with_hash(payload)
+
+
+def _refresh_watchlist_universe_file(*, refresh_metadata: bool = True) -> dict[str, Any]:
+    payload = _build_watchlist_universe_payload()
+    rows = list(payload.get("tickers") or [])
+    if refresh_metadata and rows:
+        rows = _enrich_universe_rows_with_metadata(rows)
+    payload["tickers"] = rows
+    payload["updated_at"] = utc_now_iso()
+    payload = _universe_with_hash(payload)
+    _json_dump(_watchlist_universe_path(), payload)
+    # Keep legacy custom alias file in sync for older clients.
+    _json_dump(_custom_universe_path(), payload)
+    return payload
+
+
+def _load_watchlist_universe_payload() -> dict[str, Any]:
+    path = _watchlist_universe_path()
+    payload = _json_load(path)
+    if isinstance(payload, dict):
+        tickers = payload.get("tickers")
+        if isinstance(tickers, list):
+            return payload
+    return _refresh_watchlist_universe_file(refresh_metadata=True)
+
+
+def _load_custom_universe_payload() -> dict[str, Any]:
+    # Legacy alias for older helper names.
+    return _load_watchlist_universe_payload()
+
+
+def _save_custom_universe_symbols(symbols: list[str]) -> dict[str, Any]:
+    existing = _load_watchlist_store_payload()
+    prior_by_symbol: dict[str, dict[str, Any]] = {}
+    for entry in existing.get("tickers") or []:
+        if not isinstance(entry, dict):
+            continue
+        symbol = _sanitize_symbol(entry.get("symbol") or entry.get("ticker"))
+        if not symbol:
+            continue
+        prior_by_symbol[symbol] = entry
+
+    entries: list[dict[str, Any]] = []
+    for symbol in _dedupe_symbols(symbols):
+        prev = prior_by_symbol.get(symbol) or {}
+        entries.append(
+            {
+                "symbol": symbol,
+                "added_at": str(prev.get("added_at") or utc_now_iso()),
+            }
+        )
+
+    saved = _save_watchlist_store_entries(entries)
+    _refresh_watchlist_universe_file(refresh_metadata=True)
+    return {
+        "updated_at": saved.get("updated_at"),
+        "tickers": [entry.get("symbol") for entry in (saved.get("tickers") or []) if isinstance(entry, dict)],
+    }
 
 
 def _refresh_combined_universe_file() -> None:
@@ -1290,7 +1416,7 @@ def _refresh_combined_universe_file() -> None:
 
     ns_path = _ensure_default_universe_file("nasdaq500") or (universe_dir / "nasdaq500.json")
     ws_path = _ensure_default_universe_file("wsb100") or (universe_dir / "wsb100.json")
-    custom_payload = _load_custom_universe_payload()
+    watchlist_payload = _load_watchlist_universe_payload()
 
     ns_payload = _json_load(ns_path) if ns_path is not None else None
     ws_payload = _json_load(ws_path) if ws_path is not None else None
@@ -1302,12 +1428,11 @@ def _refresh_combined_universe_file() -> None:
     combined_payload = _build_fallback_combined_payload(
         ns_payload,
         ws_payload,
-        custom_payload,
+        watchlist_payload,
         top_n=max(
             1,
             len(ns_payload.get("tickers") or [])
-            + len(ws_payload.get("tickers") or [])
-            + len(custom_payload.get("tickers") or []),
+            + len(watchlist_payload.get("tickers") or []),
         ),
     )
     combined_payload["name"] = "combined"
@@ -1334,7 +1459,8 @@ def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
     wsb_path = universe_dir / "wsb100.json"
     combined_path = universe_dir / "combined.json"
     legacy_combined_path = universe_dir / "combined400.json"
-    custom_path = universe_dir / "custom.json"
+    watchlist_path = _watchlist_universe_path()
+    custom_path = _custom_universe_path()
 
     if canonical == "nasdaq500":
         payload = _build_fallback_nasdaq_payload(symbols, top_n=500)
@@ -1347,15 +1473,15 @@ def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
         _json_dump(wsb_path, _build_fallback_wsb_payload(symbols, top_n=100))
         return wsb_path
 
-    if canonical == "custom":
-        if custom_path.exists() and custom_path.is_file():
-            return custom_path
-        _json_dump(custom_path, {"updated_at": utc_now_iso(), "tickers": []})
-        return custom_path
+    if canonical == "watchlist":
+        if watchlist_path.exists() and watchlist_path.is_file():
+            return watchlist_path
+        payload = _refresh_watchlist_universe_file(refresh_metadata=True)
+        return _watchlist_universe_path() if payload else watchlist_path
 
     ns_existing = next((p for p in _candidate_universe_paths("nasdaq500") if p.exists() and p.is_file()), nasdaq_path)
     ws_existing = next((p for p in _candidate_universe_paths("wsb100") if p.exists() and p.is_file()), wsb_path)
-    custom_existing = next((p for p in _candidate_universe_paths("custom") if p.exists() and p.is_file()), custom_path)
+    watchlist_existing = next((p for p in _candidate_universe_paths("watchlist") if p.exists() and p.is_file()), watchlist_path)
 
     if not ns_existing.exists():
         payload = _build_fallback_nasdaq_payload(symbols, top_n=500)
@@ -1365,22 +1491,24 @@ def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
     if not ws_existing.exists():
         _json_dump(wsb_path, _build_fallback_wsb_payload(symbols, top_n=100))
         ws_existing = wsb_path
-    if not custom_existing.exists():
-        _json_dump(custom_path, {"updated_at": utc_now_iso(), "tickers": []})
-        custom_existing = custom_path
+    if not watchlist_existing.exists():
+        _refresh_watchlist_universe_file(refresh_metadata=True)
+        watchlist_existing = _watchlist_universe_path()
+    if not custom_path.exists():
+        payload = _json_load(watchlist_existing) or {"updated_at": utc_now_iso(), "tickers": []}
+        _json_dump(custom_path, payload)
 
     ns_payload = _json_load(ns_existing) or _build_fallback_nasdaq_payload(symbols, top_n=500)
     ws_payload = _json_load(ws_existing) or _build_fallback_wsb_payload(symbols, top_n=100)
-    custom_payload = _json_load(custom_existing) or {"updated_at": utc_now_iso(), "tickers": []}
+    watchlist_payload = _json_load(watchlist_existing) or _build_watchlist_universe_payload()
     combined_payload = _build_fallback_combined_payload(
         ns_payload,
         ws_payload,
-        custom_payload,
+        watchlist_payload,
         top_n=max(
             1,
             len(ns_payload.get("tickers") or [])
-            + len(ws_payload.get("tickers") or [])
-            + len(custom_payload.get("tickers") or []),
+            + len(watchlist_payload.get("tickers") or []),
         ),
     )
     _json_dump(combined_path, combined_payload)
@@ -1691,6 +1819,7 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
             (payload.get("nasdaq500") or [])
             + (payload.get("nasdaq300") or [])
             + (payload.get("wsb100") or [])
+            + (payload.get("watchlist") or [])
             + (payload.get("custom") or [])
             + (payload.get("nasdaq_top_500") or [])
             + (payload.get("wsb_top_500") or [])
@@ -1699,12 +1828,12 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
     if canonical_name == "combined" and not rows:
         ns_payload, ns_rows, _ = _load_scan_universe("nasdaq500")
         ws_payload, ws_rows, _ = _load_scan_universe("wsb100")
-        custom_payload, custom_rows, _ = _load_scan_universe("custom")
+        watchlist_payload, watchlist_rows, _ = _load_scan_universe("watchlist")
         payload = _build_fallback_combined_payload(
             ns_payload or {"tickers": ns_rows},
             ws_payload or {"tickers": ws_rows},
-            custom_payload or {"tickers": custom_rows},
-            top_n=max(1, len(ns_rows) + len(ws_rows) + len(custom_rows)),
+            watchlist_payload or {"tickers": watchlist_rows},
+            top_n=max(1, len(ns_rows) + len(watchlist_rows)),
         )
         rows = payload.get("tickers") or payload.get("merged") or []
 
@@ -1757,7 +1886,11 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
                     else (
                         raw.get("average_volume_7d")
                         if raw.get("average_volume_7d") is not None
-                        else raw.get("avg_dollar_volume")
+                        else (
+                            raw.get("averageVolume")
+                            if raw.get("averageVolume") is not None
+                            else raw.get("averageDailyVolume10Day")
+                        )
                     )
                 ),
                 "avg_dollar_volume": raw.get("avg_dollar_volume") if raw.get("avg_dollar_volume") is not None else raw.get("avg_volume_7d"),
@@ -1808,8 +1941,8 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
             if len(normalized) >= 500:
                 break
 
-    if canonical_name == "custom":
-        payload["name"] = "custom"
+    if canonical_name == "watchlist":
+        payload["name"] = "watchlist"
         if normalized:
             normalized = _enrich_universe_rows_with_metadata(normalized)
         if "updated_at" not in payload:
@@ -3827,27 +3960,64 @@ async def get_trade_stats():
 # --- Watchlist ---
 @app.get("/api/watchlist")
 async def get_watchlist():
-    """Get watchlist"""
-    return db.get_watchlist()
+    """Get persisted watchlist with enriched metadata."""
+    return await get_scan_universe("watchlist")
+
+
+@app.post("/api/watchlist/add")
+async def add_watchlist_symbol(symbol: str = Query(..., min_length=1, max_length=10)):
+    """Add ticker to watchlist (idempotent) and refresh cached metadata."""
+    safe_symbol = _sanitize_symbol(symbol)
+    if not safe_symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    saved = _watchlist_add_symbol(safe_symbol)
+    return {
+        "status": "ok",
+        "symbol": safe_symbol,
+        **saved,
+    }
+
+
+@app.post("/api/watchlist/remove")
+async def remove_watchlist_symbol(symbol: str = Query(..., min_length=1, max_length=10)):
+    """Remove ticker from watchlist."""
+    safe_symbol = _sanitize_symbol(symbol)
+    if not safe_symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    saved = _watchlist_remove_symbol(safe_symbol)
+    return {
+        "status": "ok",
+        "symbol": safe_symbol,
+        **saved,
+    }
 
 
 @app.post("/api/watchlist")
 async def add_to_watchlist(item: WatchlistAdd):
-    """Add to watchlist"""
-    item_id = db.add_to_watchlist(
-        symbol=item.symbol.upper(),
-        thesis=item.thesis,
-        target_entry=item.target_entry,
-        priority=item.priority,
-    )
-    return {"id": item_id, "status": "added"}
+    """Legacy body-based watchlist add route."""
+    symbol = _sanitize_symbol(item.symbol)
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    saved = _watchlist_add_symbol(symbol)
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        **saved,
+    }
 
 
 @app.delete("/api/watchlist/{symbol}")
 async def remove_from_watchlist(symbol: str):
-    """Remove from watchlist"""
-    db.remove_from_watchlist(symbol.upper())
-    return {"status": "removed"}
+    """Legacy delete watchlist route."""
+    safe_symbol = _sanitize_symbol(symbol)
+    if not safe_symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    saved = _watchlist_remove_symbol(safe_symbol)
+    return {
+        "status": "ok",
+        "symbol": safe_symbol,
+        **saved,
+    }
 
 
 # --- Alerts ---
@@ -4679,7 +4849,7 @@ def _normalize_nasdaq500_payload(
 def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
     universe_dir = _universe_root()
     universe_dir.mkdir(parents=True, exist_ok=True)
-    custom_payload = _load_custom_universe_payload()
+    watchlist_payload = _load_watchlist_universe_payload()
 
     if build_nasdaq_top_500 is None or build_wsb_top_500 is None or build_combined_universe is None:
         warnings = ["Universe builder dependency unavailable; generated deterministic fallback payloads."]
@@ -4689,12 +4859,14 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
         combined_payload = _build_fallback_combined_payload(
             nasdaq_payload,
             wsb_payload,
-            custom_payload,
-            top_n=max(1, len(nasdaq_payload.get("tickers") or []) + len(wsb_payload.get("tickers") or []) + len(custom_payload.get("tickers") or [])),
+            watchlist_payload,
+            top_n=max(1, len(nasdaq_payload.get("tickers") or []) + len(watchlist_payload.get("tickers") or [])),
         )
         _json_dump(universe_dir / "nasdaq500.json", nasdaq_payload)
         _json_dump(universe_dir / "nasdaq300.json", nasdaq_payload)
         _json_dump(universe_dir / "wsb100.json", wsb_payload)
+        _json_dump(universe_dir / "watchlist.json", watchlist_payload)
+        _json_dump(universe_dir / "custom.json", watchlist_payload)
         _json_dump(universe_dir / "combined.json", combined_payload)
         _json_dump(universe_dir / "combined400.json", combined_payload)
         return {
@@ -4704,7 +4876,7 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
                 "nasdaq500": {"count": len(nasdaq_payload.get("tickers") or [])},
                 "wsb100": {"count": len(wsb_payload.get("tickers") or [])},
                 "combined": {"count": len(combined_payload.get("tickers") or [])},
-                "custom": {"count": len(custom_payload.get("tickers") or [])},
+                "watchlist": {"count": len(watchlist_payload.get("tickers") or [])},
             },
             "generated_at": utc_now_iso(),
         }
@@ -4809,12 +4981,11 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
     combined_payload = _build_fallback_combined_payload(
         nasdaq_payload,
         wsb_payload,
-        custom_payload,
+        watchlist_payload,
         top_n=max(
             1,
             len(nasdaq_payload.get("tickers") or [])
-            + len(wsb_payload.get("tickers") or [])
-            + len(custom_payload.get("tickers") or []),
+            + len(watchlist_payload.get("tickers") or []),
         ),
     )
     combined_payload["name"] = "combined"
@@ -4824,6 +4995,8 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
     combined_payload = _universe_with_hash(combined_payload)
     _json_dump(combined_path, combined_payload)
     _json_dump(combined_legacy_path, combined_payload)
+    _json_dump(universe_dir / "watchlist.json", watchlist_payload)
+    _json_dump(universe_dir / "custom.json", watchlist_payload)
 
     if cache_dirty:
         _save_universe_metadata_cache(cache)
@@ -4850,9 +5023,9 @@ def _rebuild_universe_payloads(force: bool = False) -> dict[str, Any]:
                 "count": len(combined_payload.get("tickers") or []),
                 "universe_hash": combined_payload.get("universe_hash"),
             },
-            "custom": {
-                "path": str(_custom_universe_path()),
-                "count": len(custom_payload.get("tickers") or []),
+            "watchlist": {
+                "path": str(_watchlist_store_path()),
+                "count": len(watchlist_payload.get("tickers") or []),
                 "universe_hash": None,
             },
         },
@@ -4917,51 +5090,107 @@ async def rebuild_universes_endpoint(force: bool = Query(False)):
         }
 
 
+def _watchlist_response_from_store(payload: dict[str, Any]) -> dict[str, Any]:
+    symbols = _watchlist_symbols(payload)
+    return {
+        "updated_at": payload.get("updated_at"),
+        "count": len(symbols),
+        "tickers": symbols,
+    }
+
+
+def _watchlist_add_symbol(symbol: str) -> dict[str, Any]:
+    payload = _load_watchlist_store_payload()
+    existing_by_symbol: dict[str, dict[str, Any]] = {}
+    for entry in payload.get("tickers") or []:
+        if not isinstance(entry, dict):
+            continue
+        entry_symbol = _sanitize_symbol(entry.get("symbol") or entry.get("ticker"))
+        if not entry_symbol:
+            continue
+        existing_by_symbol[entry_symbol] = entry
+
+    if symbol not in existing_by_symbol:
+        existing_by_symbol[symbol] = {
+            "symbol": symbol,
+            "added_at": utc_now_iso(),
+        }
+
+    saved = _save_watchlist_store_entries(list(existing_by_symbol.values()))
+    _refresh_watchlist_universe_file(refresh_metadata=True)
+    _refresh_combined_universe_file()
+    return _watchlist_response_from_store(saved)
+
+
+def _watchlist_remove_symbol(symbol: str) -> dict[str, Any]:
+    payload = _load_watchlist_store_payload()
+    entries = []
+    for entry in payload.get("tickers") or []:
+        if not isinstance(entry, dict):
+            continue
+        entry_symbol = _sanitize_symbol(entry.get("symbol") or entry.get("ticker"))
+        if not entry_symbol or entry_symbol == symbol:
+            continue
+        entries.append(
+            {
+                "symbol": entry_symbol,
+                "added_at": str(entry.get("added_at") or utc_now_iso()),
+            }
+        )
+
+    saved = _save_watchlist_store_entries(entries)
+    _refresh_watchlist_universe_file(refresh_metadata=True)
+    _refresh_combined_universe_file()
+    return _watchlist_response_from_store(saved)
+
+
+@app.get("/api/universe/watchlist")
+async def get_watchlist_universe_endpoint():
+    return await get_scan_universe("watchlist")
+
+
 @app.get("/api/universe/custom")
 async def get_custom_universe_endpoint():
-    return await get_scan_universe("custom")
+    # Legacy route alias.
+    return await get_scan_universe("watchlist")
+
+
+@app.post("/api/universe/watchlist/add")
+async def add_watchlist_universe_symbol(request: CustomUniverseSymbolRequest):
+    symbol = _sanitize_symbol(request.symbol)
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    saved = _watchlist_add_symbol(symbol)
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        **saved,
+    }
 
 
 @app.post("/api/universe/custom/add")
 async def add_custom_universe_symbol(request: CustomUniverseSymbolRequest):
+    # Legacy route alias.
+    return await add_watchlist_universe_symbol(request)
+
+
+@app.post("/api/universe/watchlist/remove")
+async def remove_watchlist_universe_symbol(request: CustomUniverseSymbolRequest):
     symbol = _sanitize_symbol(request.symbol)
     if not symbol:
         raise HTTPException(status_code=400, detail="Invalid symbol")
-
-    payload = _load_custom_universe_payload()
-    symbols = list(payload.get("tickers") or [])
-    if symbol not in symbols:
-        symbols.append(symbol)
-    saved = _save_custom_universe_symbols(symbols)
-    _refresh_combined_universe_file()
-
+    saved = _watchlist_remove_symbol(symbol)
     return {
         "status": "ok",
         "symbol": symbol,
-        "updated_at": saved.get("updated_at"),
-        "count": len(saved.get("tickers") or []),
-        "tickers": saved.get("tickers") or [],
+        **saved,
     }
 
 
 @app.post("/api/universe/custom/remove")
 async def remove_custom_universe_symbol(request: CustomUniverseSymbolRequest):
-    symbol = _sanitize_symbol(request.symbol)
-    if not symbol:
-        raise HTTPException(status_code=400, detail="Invalid symbol")
-
-    payload = _load_custom_universe_payload()
-    symbols = [item for item in (payload.get("tickers") or []) if _sanitize_symbol(item) != symbol]
-    saved = _save_custom_universe_symbols(symbols)
-    _refresh_combined_universe_file()
-
-    return {
-        "status": "ok",
-        "symbol": symbol,
-        "updated_at": saved.get("updated_at"),
-        "count": len(saved.get("tickers") or []),
-        "tickers": saved.get("tickers") or [],
-    }
+    # Legacy route alias.
+    return await remove_watchlist_universe_symbol(request)
 
 
 @app.get("/universe/list")
@@ -5020,7 +5249,15 @@ async def get_scan_universe(universe_name: str):
                 "avg_volume_7d": _coerce_optional_float(
                     row.get("avg_volume_7d")
                     if row.get("avg_volume_7d") is not None
-                    else row.get("avg_dollar_volume")
+                    else (
+                        row.get("average_volume_7d")
+                        if row.get("average_volume_7d") is not None
+                        else (
+                            row.get("averageVolume")
+                            if row.get("averageVolume") is not None
+                            else row.get("averageDailyVolume10Day")
+                        )
+                    )
                 ),
                 "change_pct_1d": _coerce_optional_float(
                     row.get("change_pct_1d")
@@ -6537,30 +6774,59 @@ def _fetch_single_stock_metadata(symbol: str) -> dict[str, Any]:
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info or {}
+        fast_info = {}
+        try:
+            fi = getattr(ticker, "fast_info", None)
+            if fi is not None:
+                fast_info = dict(fi)
+        except Exception:
+            fast_info = {}
 
         result["name"] = info.get("shortName") or info.get("longName")
         result["sector"] = info.get("sector")
         result["market_cap"] = info.get("marketCap")
 
-        # Calculate change percent from previous close
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
-        if current_price is not None and prev_close is not None and prev_close > 0:
-            result["change_percent_1d"] = round(((current_price - prev_close) / prev_close) * 100, 4)
-
-        # 7-day average volume: fetch last 10 days of history and average the last 7
-        avg_vol = info.get("averageVolume")
-        if avg_vol is not None:
-            result["avg_volume_7d"] = avg_vol
+        # Prefer direct percentage field when available.
+        change_pct = info.get("regularMarketChangePercent")
+        if change_pct is None:
+            change_pct = fast_info.get("regularMarketChangePercent")
+        if change_pct is not None:
+            result["change_percent_1d"] = round(float(change_pct), 4)
         else:
-            try:
-                hist = ticker.history(period="10d")
-                if hist is not None and not hist.empty and "Volume" in hist.columns:
-                    recent_vol = hist["Volume"].tail(7)
-                    if len(recent_vol) > 0:
-                        result["avg_volume_7d"] = int(recent_vol.mean())
-            except Exception:
-                pass
+            current_price = (
+                info.get("currentPrice")
+                or info.get("regularMarketPrice")
+                or fast_info.get("lastPrice")
+            )
+            prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+            if current_price is not None and prev_close is not None and prev_close > 0:
+                result["change_percent_1d"] = round(((float(current_price) - float(prev_close)) / float(prev_close)) * 100, 4)
+
+        # 7-day average volume from recent bars, then fall back to provider summary fields.
+        history_avg_volume: Optional[float] = None
+        try:
+            hist = ticker.history(period="1mo", interval="1d")
+            if hist is not None and not hist.empty and "Volume" in hist.columns:
+                recent_vol = hist["Volume"].tail(7)
+                if len(recent_vol) > 0:
+                    history_avg_volume = float(recent_vol.mean())
+        except Exception:
+            history_avg_volume = None
+
+        if history_avg_volume is not None and np.isfinite(history_avg_volume):
+            result["avg_volume_7d"] = int(round(history_avg_volume))
+        else:
+            avg_vol = (
+                info.get("averageVolume")
+                or info.get("averageDailyVolume10Day")
+                or fast_info.get("tenDayAverageVolume")
+                or fast_info.get("threeMonthAverageVolume")
+            )
+            if avg_vol is not None:
+                try:
+                    result["avg_volume_7d"] = int(float(avg_vol))
+                except Exception:
+                    pass
 
     except Exception as exc:
         result["error"] = str(exc)

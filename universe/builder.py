@@ -128,6 +128,29 @@ _NEGATIVE_WORDS = {
     "weak",
 }
 
+_COMMON_STOCK_HINTS = (
+    "common stock",
+    "common shares",
+    "ordinary shares",
+    "class a common stock",
+    "class b common stock",
+    "class c common stock",
+)
+
+_NON_COMMON_SECURITY_HINTS = (
+    "etf",
+    "exchange traded fund",
+    "fund",
+    "trust",
+    "depositary",
+    "depositary shares",
+    "bond",
+    "notes",
+    "warrant",
+    "rights",
+    "preferred",
+)
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -248,25 +271,51 @@ def _fetch_nasdaq_symbols_default() -> tuple[list[dict[str, Any]], list[dict[str
         headers = {"User-Agent": "dpolaris-universe-builder/1.0"}
         response = httpx.get(_NASDAQ_SYMBOLS_URL, headers=headers, timeout=20.0)
         response.raise_for_status()
+        lines = [line for line in response.text.splitlines() if line.strip()]
+        if not lines:
+            raise ValueError("nasdaqlisted.txt payload was empty")
+
+        header_line = next((line for line in lines if line.startswith("Symbol|")), "")
+        if not header_line:
+            raise ValueError("nasdaqlisted.txt header row not found")
+        header_parts = [part.strip() for part in header_line.split("|")]
+        index_map = {name.lower(): idx for idx, name in enumerate(header_parts)}
+        symbol_idx = index_map.get("symbol")
+        security_name_idx = index_map.get("security name")
+        test_issue_idx = index_map.get("test issue")
+        etf_idx = index_map.get("etf")
+        if symbol_idx is None:
+            raise ValueError("nasdaqlisted.txt missing Symbol column")
+
         rows: list[dict[str, Any]] = []
-        for line in response.text.splitlines():
+        for line in lines:
             if "|" not in line or line.startswith("Symbol|"):
                 continue
             if line.startswith("File Creation Time"):
                 continue
             parts = line.split("|")
-            if len(parts) < 8:
+            if symbol_idx >= len(parts):
                 continue
-            symbol = _sanitize_symbol(parts[0])
+            symbol = _sanitize_symbol(parts[symbol_idx])
             if not symbol:
                 continue
-            test_issue = (parts[6] or "").strip().upper()
+            test_issue = (parts[test_issue_idx] if test_issue_idx is not None and test_issue_idx < len(parts) else "").strip().upper()
             if test_issue == "Y":
+                continue
+            etf_flag = (parts[etf_idx] if etf_idx is not None and etf_idx < len(parts) else "").strip().upper()
+            if etf_flag == "Y":
+                continue
+
+            security_name = (
+                (parts[security_name_idx] if security_name_idx is not None and security_name_idx < len(parts) else symbol).strip()
+                or symbol
+            )
+            if not _looks_like_common_stock_name(security_name):
                 continue
             rows.append(
                 {
                     "symbol": symbol,
-                    "company_name": (parts[1] or symbol).strip(),
+                    "company_name": security_name,
                     "sector": None,
                     "industry": None,
                 }
@@ -294,6 +343,17 @@ def _fallback_symbols() -> list[dict[str, Any]]:
         "AAPL,MSFT,NVDA,AMZN,META,GOOGL,TSLA,AVGO,COST,NFLX,AMD,INTC,ADBE,CSCO,PEP",
     )
     return _normalize_symbol_rows([s.strip() for s in fallback.split(",") if s.strip()])
+
+
+def _looks_like_common_stock_name(security_name: str) -> bool:
+    name = (security_name or "").strip().lower()
+    if not name:
+        return True
+    if any(hint in name for hint in _COMMON_STOCK_HINTS):
+        return True
+    if any(hint in name for hint in _NON_COMMON_SECURITY_HINTS):
+        return False
+    return True
 
 
 def _fallback_data_sources() -> list[dict[str, Any]]:
