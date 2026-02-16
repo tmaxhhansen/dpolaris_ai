@@ -302,7 +302,11 @@ def performance():
 @click.option("--port", default=8420, help="Port to bind to")
 def server(host: str, port: int):
     """Start the API server"""
+    os.environ.setdefault("LLM_PROVIDER", "none")
+    os.environ["DPOLARIS_BACKEND_HOST"] = str(host)
+    os.environ["DPOLARIS_BACKEND_PORT"] = str(int(port))
     console.print(f"Starting dPolaris API server at http://{host}:{port}")
+    console.print(f"LLM_PROVIDER={os.environ.get('LLM_PROVIDER', 'none')}")
 
     from api import run_server
     run_server(host=host, port=port)

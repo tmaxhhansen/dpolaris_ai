@@ -75,10 +75,16 @@ class FeatureEngine:
         # Drop rows with NaN (from lookback calculations)
         df = df.dropna()
 
-        # Store feature names
+        # Store feature names - exclude raw OHLCV, canonical schema metadata, and target columns
+        excluded_cols = {
+            "date", "open", "high", "low", "close", "volume", "symbol",
+            # Canonical schema columns (non-numeric or metadata)
+            "timestamp", "adj_close", "dividend", "split_factor",
+            "session", "is_market_holiday", "is_synthetic",
+        }
         self.feature_names = [
             col for col in df.columns
-            if col not in ["date", "open", "high", "low", "close", "volume", "symbol"]
+            if col not in excluded_cols
             and not col.startswith("target_")
         ]
 
