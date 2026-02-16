@@ -96,6 +96,31 @@ Expected:
 - `/api/universe/list` returns names including `nasdaq300`, `wsb100`, `combined`
 - each universe endpoint returns `count > 0` and non-empty `tickers`
 
+### Analysis Report Pipeline (LLM-free)
+
+Deep-learning analysis reports are persisted as durable artifacts under:
+- `~/dpolaris_data/analysis/*.json`
+
+The backend generates a fixed multi-section report (Overview, Price/Volume Snapshot, Technical Indicators, Chart Patterns, Model Signals, News, Risk Notes, Next Steps) without requiring Anthropic keys.
+
+```bash
+# Fast report generation (no retraining required)
+curl -X POST 'http://127.0.0.1:8420/api/analyze/report?symbol=AAPL'
+
+# List saved reports (newest first)
+curl 'http://127.0.0.1:8420/api/analysis/list?limit=200'
+
+# List reports for one symbol
+curl 'http://127.0.0.1:8420/api/analysis/by-symbol/AAPL?limit=50'
+
+# Fetch one full report payload
+curl 'http://127.0.0.1:8420/api/analysis/<analysis_id>'
+```
+
+Notes:
+- Default news mode is disabled (`DPOLARIS_NEWS_PROVIDER=disabled`) for deterministic, keyless operation.
+- Optional lightweight news mode: `DPOLARIS_NEWS_PROVIDER=yfinance`.
+
 ## Windows Orchestrator Notes
 
 Always run server and orchestrator with the venv interpreter, not system Python.

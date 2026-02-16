@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -80,6 +81,22 @@ except Exception:  # pragma: no cover
     derive_regime = None
     latest_ohlcv_snapshot = None
     truncate_dataframe_asof = None
+
+try:
+    from analysis.artifacts import (
+        latest_analysis_for_symbol as load_latest_analysis_artifact,
+        list_analysis_artifacts as list_analysis_artifacts_store,
+        load_analysis_artifact as load_analysis_artifact_store,
+        write_analysis_artifact as write_analysis_artifact_store,
+    )
+    from analysis.pipeline import default_version_info, generate_analysis_report
+except Exception:  # pragma: no cover
+    load_latest_analysis_artifact = None
+    list_analysis_artifacts_store = None
+    load_analysis_artifact_store = None
+    write_analysis_artifact_store = None
+    default_version_info = None
+    generate_analysis_report = None
 
 logger = logging.getLogger("dpolaris.api")
 
@@ -591,6 +608,179 @@ def _runs_root() -> Path:
     if not path.is_absolute():
         path = _repo_root() / path
     return path
+
+
+def _analysis_data_dir() -> Path:
+    if config is not None and getattr(config, "data_dir", None) is not None:
+        try:
+            return Path(config.data_dir).expanduser()
+        except Exception:
+            pass
+    return Path("~/dpolaris_data").expanduser()
+
+
+def _training_window_from_history(df: Any) -> dict[str, Any]:
+    if df is None:
+        return {}
+    try:
+        rows = int(len(df))
+    except Exception:
+        return {}
+    if rows <= 0:
+        return {}
+
+    time_col = None
+    for candidate in ("date", "timestamp"):
+        if candidate in getattr(df, "columns", []):
+            time_col = candidate
+            break
+
+    if not time_col:
+        return {"rows": rows}
+
+    try:
+        start = str(df[time_col].iloc[0])
+        end = str(df[time_col].iloc[-1])
+        return {"rows": rows, "start": start, "end": end}
+    except Exception:
+        return {"rows": rows}
+
+
+def _analysis_version_info(extra: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    info: dict[str, Any] = {}
+    if default_version_info is not None:
+        try:
+            base = default_version_info()
+            if isinstance(base, dict):
+                info.update(base)
+        except Exception:
+            pass
+    info.setdefault("python_version", platform.python_version())
+    info.setdefault("platform", platform.platform())
+    info.setdefault("python_executable", sys.executable)
+    info.setdefault("llm_provider", os.getenv("LLM_PROVIDER", "none"))
+    if extra:
+        info.update(extra)
+    return info
+
+
+def _detected_runtime_device() -> str:
+    try:
+        from core.device import detect_device
+
+        detected = detect_device()
+        return str(detected.get("device") or "cpu")
+    except Exception:
+        return "cpu"
+
+
+async def _fetch_analysis_history(symbol: str, history_days: int) -> Any:
+    market = market_service or MarketDataService()
+    return await market.get_historical(symbol, days=max(120, int(history_days)))
+
+
+def _extract_model_signals(prediction: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    if not isinstance(prediction, dict):
+        return None
+    if prediction.get("probability_up") is None and prediction.get("confidence") is None:
+        return None
+    return {
+        "prediction_label": prediction.get("prediction_label"),
+        "confidence": _safe_float(prediction.get("confidence"), 0.5),
+        "probability_up": _safe_float(prediction.get("probability_up"), 0.5),
+        "probability_down": _safe_float(prediction.get("probability_down"), 0.5),
+        "raw_probability_up": prediction.get("raw_probability_up"),
+        "raw_probability_down": prediction.get("raw_probability_down"),
+    }
+
+
+def _build_analysis_payload(
+    *,
+    symbol: str,
+    report: dict[str, Any],
+    model_type: str,
+    device: str,
+    history_df: Any,
+    source: str,
+    run_id: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "ticker": symbol,
+        "created_at": report.get("created_at") or utc_now_iso(),
+        "model_type": model_type or "none",
+        "training_window": _training_window_from_history(history_df),
+        "device": device or "cpu",
+        "version_info": _analysis_version_info({"source": source, "run_id": run_id}),
+        "summary": str(report.get("summary") or ""),
+        "report_text": str(report.get("report_text") or ""),
+        "signals": report.get("model_signals") or {},
+        "indicators": report.get("technical_indicators") or {},
+        "news_refs": ((report.get("news") or {}).get("items") or []) if isinstance(report.get("news"), dict) else [],
+        "report": report,
+        "source": source,
+        "run_id": run_id,
+    }
+
+
+async def _generate_and_store_analysis(
+    *,
+    symbol: str,
+    history_df: Any,
+    model_signals: Optional[dict[str, Any]] = None,
+    model_metadata: Optional[dict[str, Any]] = None,
+    model_type: str = "none",
+    device: Optional[str] = None,
+    source: str = "analysis",
+    run_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    if generate_analysis_report is None or write_analysis_artifact_store is None:
+        return None
+    report = generate_analysis_report(
+        symbol=symbol,
+        history=history_df,
+        model_signals=model_signals,
+        model_metadata=model_metadata,
+    )
+    payload = _build_analysis_payload(
+        symbol=symbol,
+        report=report,
+        model_type=model_type or "none",
+        device=device or _detected_runtime_device(),
+        history_df=history_df,
+        source=source,
+        run_id=run_id,
+    )
+    return write_analysis_artifact_store(payload, data_dir=_analysis_data_dir())
+
+
+async def _load_model_context_for_analysis(symbol: str, history_df: Any) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]], str, str]:
+    model_signals: Optional[dict[str, Any]] = None
+    model_metadata: Optional[dict[str, Any]] = None
+    model_type = "none"
+    device = _detected_runtime_device()
+
+    try:
+        from ml.deep_learning import DeepLearningTrainer
+
+        trainer = DeepLearningTrainer()
+        model, scaler, metadata = trainer.load_model(symbol)
+        prediction = trainer.predict(
+            model,
+            scaler,
+            history_df,
+            probability_calibration=(metadata.get("metrics") or {}).get("probability_calibration")
+            if isinstance(metadata, dict)
+            else None,
+        )
+        model_signals = _extract_model_signals(prediction)
+        model_metadata = metadata if isinstance(metadata, dict) else {}
+        model_type = str((model_metadata or {}).get("model_type") or "deep_learning")
+        device = str(getattr(trainer, "device", device))
+    except Exception:
+        model_signals = None
+        model_metadata = None
+
+    return model_signals, model_metadata, model_type, device
 
 
 def _scan_run_dir(run_id: str) -> Path:
@@ -2531,6 +2721,35 @@ async def _run_deep_learning_job(job_id: str) -> None:
             except Exception as exc:
                 logger.warning("Unable to persist training logs in run artifact %s: %s", run_dir, exc)
         _append_training_job_log(job, "Training completed successfully")
+        try:
+            analysis_history_days = int(os.getenv("DPOLARIS_ANALYSIS_HISTORY_DAYS", "730"))
+            history_df = await _fetch_analysis_history(symbol, analysis_history_days)
+            if history_df is not None and len(history_df) >= 60:
+                model_signals, model_metadata, resolved_model_type, device_hint = await _load_model_context_for_analysis(
+                    symbol,
+                    history_df,
+                )
+                analysis_artifact = await _generate_and_store_analysis(
+                    symbol=symbol,
+                    history_df=history_df,
+                    model_signals=model_signals,
+                    model_metadata=model_metadata,
+                    model_type=str(result.get("model_type") or resolved_model_type),
+                    device=str(result.get("device") or device_hint),
+                    source="deep_learning_job",
+                    run_id=str(result.get("run_id") or job_id),
+                )
+                if analysis_artifact:
+                    job_result = job.setdefault("result", {})
+                    job_result["analysis_id"] = analysis_artifact.get("id")
+                    job_result["analysis_summary"] = analysis_artifact.get("summary")
+                    job_result["analysis_report"] = analysis_artifact.get("report_text")
+                    _append_training_job_log(
+                        job,
+                        f"Analysis artifact saved ({analysis_artifact.get('id')})",
+                    )
+        except Exception as analysis_exc:
+            logger.warning("Unable to persist analysis artifact for job %s: %s", job_id, analysis_exc)
 
         logger.info("Deep-learning job %s completed for %s", job_id, symbol)
 
@@ -2578,6 +2797,26 @@ async def _run_deep_learning_job(job_id: str) -> None:
                 }
             except Exception as artifact_exc:
                 logger.warning("Failed to write failure run artifact for job %s: %s", job_id, artifact_exc)
+        try:
+            analysis_history_days = int(os.getenv("DPOLARIS_ANALYSIS_HISTORY_DAYS", "730"))
+            history_df = await _fetch_analysis_history(symbol, analysis_history_days)
+            if history_df is not None and len(history_df) >= 60:
+                analysis_artifact = await _generate_and_store_analysis(
+                    symbol=symbol,
+                    history_df=history_df,
+                    model_signals=None,
+                    model_metadata={"error": error_message},
+                    model_type=model_type,
+                    device=_detected_runtime_device(),
+                    source="deep_learning_job_failed",
+                    run_id=job_id,
+                )
+                if analysis_artifact:
+                    job_result = job.setdefault("result", {})
+                    job_result["analysis_id"] = analysis_artifact.get("id")
+                    job_result["analysis_summary"] = analysis_artifact.get("summary")
+        except Exception as analysis_exc:
+            logger.warning("Unable to persist failure analysis artifact for job %s: %s", job_id, analysis_exc)
         _append_training_job_log(job, f"Training failed ({error_code}): {error_message}")
         logger.exception("Deep-learning job %s failed for %s", job_id, symbol)
 
@@ -4319,7 +4558,7 @@ async def train_deep_learning(symbol: str, model_type: str = "lstm", epochs: int
             epochs=epochs,
         )
 
-        return {
+        response = {
             "symbol": symbol.upper(),
             "model_name": result.get("model_name", symbol.upper()),
             "model_type": result.get("model_type", model_type),
@@ -4331,6 +4570,33 @@ async def train_deep_learning(symbol: str, model_type: str = "lstm", epochs: int
             "run_id": result.get("run_id"),
             "run_dir": result.get("run_dir"),
         }
+        try:
+            history_df = await _fetch_analysis_history(
+                symbol.upper(),
+                int(os.getenv("DPOLARIS_ANALYSIS_HISTORY_DAYS", "730")),
+            )
+            if history_df is not None and len(history_df) >= 60:
+                model_signals, model_metadata, resolved_model_type, device_hint = await _load_model_context_for_analysis(
+                    symbol.upper(),
+                    history_df,
+                )
+                analysis_artifact = await _generate_and_store_analysis(
+                    symbol=symbol.upper(),
+                    history_df=history_df,
+                    model_signals=model_signals,
+                    model_metadata=model_metadata,
+                    model_type=str(result.get("model_type") or resolved_model_type),
+                    device=str(result.get("device") or device_hint),
+                    source="deep_learning_train_endpoint",
+                    run_id=str(result.get("run_id") or ""),
+                )
+                if analysis_artifact:
+                    response["analysis_id"] = analysis_artifact.get("id")
+                    response["analysis_summary"] = analysis_artifact.get("summary")
+                    response["analysis_report"] = analysis_artifact.get("report_text")
+        except Exception as analysis_exc:
+            logger.warning("Unable to persist analysis artifact for train endpoint %s: %s", symbol, analysis_exc)
+        return response
 
     except HTTPException:
         raise
@@ -4401,7 +4667,7 @@ async def deep_learning_predict(symbol: str):
             probability_calibration=metadata.get("metrics", {}).get("probability_calibration"),
         )
 
-        return {
+        response = {
             "symbol": symbol.upper(),
             "prediction": result["prediction_label"],
             "confidence": result["confidence"],
@@ -4410,6 +4676,26 @@ async def deep_learning_predict(symbol: str):
             "model_type": metadata.get("model_type", "unknown"),
             "model_accuracy": metadata.get("metrics", {}).get("accuracy"),
         }
+        try:
+            model_signals = _extract_model_signals(result)
+            analysis_artifact = await _generate_and_store_analysis(
+                symbol=symbol.upper(),
+                history_df=df,
+                model_signals=model_signals,
+                model_metadata=metadata if isinstance(metadata, dict) else {},
+                model_type=str((metadata or {}).get("model_type") or "deep_learning"),
+                device=str(getattr(trainer, "device", _detected_runtime_device())),
+                source="deep_learning_predict",
+                run_id=str((metadata or {}).get("run_id") or ""),
+            )
+            if analysis_artifact:
+                response["analysis_id"] = analysis_artifact.get("id")
+                response["analysis_summary"] = analysis_artifact.get("summary")
+                response["analysis_report"] = analysis_artifact.get("report_text")
+        except Exception as analysis_exc:
+            logger.warning("Unable to persist analysis artifact for predict %s: %s", symbol, analysis_exc)
+
+        return response
 
     except HTTPException:
         raise
@@ -4493,7 +4779,7 @@ async def run_deep_learning(request: DeepLearningRunRequest):
                     df,
                     probability_calibration=metadata.get("metrics", {}).get("probability_calibration"),
                 )
-                results[symbol] = {
+                result_row = {
                     "prediction": prediction.get("prediction_label", "UNKNOWN"),
                     "confidence": prediction.get("confidence", 0.5),
                     "probability_up": prediction.get("probability_up", 0.5),
@@ -4502,6 +4788,25 @@ async def run_deep_learning(request: DeepLearningRunRequest):
                     "model_accuracy": metadata.get("metrics", {}).get("accuracy"),
                     "status": "success",
                 }
+                try:
+                    model_signals = _extract_model_signals(prediction)
+                    analysis_artifact = await _generate_and_store_analysis(
+                        symbol=symbol,
+                        history_df=df,
+                        model_signals=model_signals,
+                        model_metadata=metadata if isinstance(metadata, dict) else {},
+                        model_type=str(metadata.get("model_type", request.model_type)),
+                        device=str(getattr(trainer, "device", _detected_runtime_device())),
+                        source="deep_learning_run",
+                        run_id=str((metadata or {}).get("run_id") or ""),
+                    )
+                    if analysis_artifact:
+                        result_row["analysis_id"] = analysis_artifact.get("id")
+                        result_row["analysis_summary"] = analysis_artifact.get("summary")
+                        result_row["analysis_report"] = analysis_artifact.get("report_text")
+                except Exception as analysis_exc:
+                    logger.warning("Unable to persist analysis artifact for %s: %s", symbol, analysis_exc)
+                results[symbol] = result_row
             except Exception as pred_err:
                 errors[symbol] = f"Prediction failed: {pred_err}"
 
@@ -5170,11 +5475,25 @@ async def get_stocks_metadata(symbols: str = Query(..., min_length=1, descriptio
 
 
 def _find_latest_analysis_for_symbol(symbol: str) -> Optional[dict[str, Any]]:
-    """Find the most recent training run artifact for a given symbol."""
+    symbol_upper = symbol.upper()
+
+    if load_latest_analysis_artifact is not None:
+        try:
+            artifact = load_latest_analysis_artifact(symbol_upper, data_dir=_analysis_data_dir())
+            if isinstance(artifact, dict):
+                return {
+                    "last_analysis_at": artifact.get("created_at"),
+                    "run_id": artifact.get("run_id"),
+                    "model_type": artifact.get("model_type"),
+                    "status": "completed",
+                    "analysis_id": artifact.get("id"),
+                    "summary": artifact.get("summary"),
+                }
+        except Exception:
+            pass
+
     if list_training_runs is None:
         return None
-
-    symbol_upper = symbol.upper()
 
     try:
         runs = list_training_runs(limit=500)
@@ -5192,6 +5511,69 @@ def _find_latest_analysis_for_symbol(symbol: str) -> Optional[dict[str, Any]]:
         pass
 
     return None
+
+
+@app.post("/api/analyze/report")
+async def generate_analysis_report_endpoint(
+    symbol: str = Query(..., min_length=1, description="Ticker symbol"),
+):
+    """
+    Fast-path report generation without retraining.
+
+    Includes model probabilities when a trained model exists, otherwise returns
+    indicator/pattern/news-driven analysis only.
+    """
+    if generate_analysis_report is None or write_analysis_artifact_store is None:
+        raise HTTPException(status_code=503, detail="Analysis pipeline unavailable")
+
+    normalized = _sanitize_symbol(symbol)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+
+    history_days = int(os.getenv("DPOLARIS_ANALYSIS_HISTORY_DAYS", "730"))
+    history_df = await _fetch_analysis_history(normalized, history_days)
+    if history_df is None or len(history_df) < 60:
+        raise HTTPException(status_code=400, detail=f"Not enough historical data for {normalized}")
+
+    model_signals, model_metadata, model_type, device = await _load_model_context_for_analysis(
+        normalized,
+        history_df,
+    )
+    artifact = await _generate_and_store_analysis(
+        symbol=normalized,
+        history_df=history_df,
+        model_signals=model_signals,
+        model_metadata=model_metadata,
+        model_type=model_type,
+        device=device,
+        source="api_analyze_report",
+        run_id=None,
+    )
+    if not artifact:
+        raise HTTPException(status_code=500, detail="Failed to store analysis artifact")
+    return artifact
+
+
+@app.get("/api/analysis/list")
+async def list_analysis_endpoint(limit: int = Query(200, ge=1, le=500)):
+    """List analysis artifacts sorted by created_at descending."""
+    if list_analysis_artifacts_store is None:
+        return []
+    return list_analysis_artifacts_store(data_dir=_analysis_data_dir(), limit=limit)
+
+
+@app.get("/api/analysis/by-symbol/{ticker}")
+async def list_analysis_by_symbol_endpoint(
+    ticker: str,
+    limit: int = Query(50, ge=1, le=500),
+):
+    """List analysis artifacts for one ticker sorted by created_at descending."""
+    symbol = _sanitize_symbol(ticker)
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Invalid ticker")
+    if list_analysis_artifacts_store is None:
+        return []
+    return list_analysis_artifacts_store(data_dir=_analysis_data_dir(), limit=limit, ticker=symbol)
 
 
 @app.get("/api/analysis/last")
@@ -5314,6 +5696,29 @@ async def get_analysis_detail(symbol: str):
     if not symbol_upper:
         raise HTTPException(status_code=400, detail={"error": "invalid_symbol", "message": "Symbol is required"})
 
+    if load_latest_analysis_artifact is not None:
+        latest = load_latest_analysis_artifact(symbol_upper, data_dir=_analysis_data_dir())
+        if isinstance(latest, dict):
+            return {
+                "symbol": symbol_upper,
+                "last_analysis_at": latest.get("created_at"),
+                "run_id": latest.get("run_id"),
+                "analysis_id": latest.get("id"),
+                "model_type": latest.get("model_type"),
+                "device": latest.get("device"),
+                "status": "completed",
+                "summary": latest.get("summary"),
+                "report_text": latest.get("report_text"),
+                "artifacts": [
+                    {
+                        "type": "analysis_report",
+                        "title": "Multi-Section Analysis Report",
+                        "data": latest.get("report") or {},
+                    }
+                ],
+                "analysis": latest,
+            }
+
     # Find the latest analysis for this symbol
     analysis_info = _find_latest_analysis_for_symbol(symbol_upper)
 
@@ -5333,10 +5738,24 @@ async def get_analysis_detail(symbol: str):
         "symbol": symbol_upper,
         "last_analysis_at": analysis_info.get("last_analysis_at"),
         "run_id": run_id,
+        "analysis_id": analysis_info.get("analysis_id"),
         "model_type": analysis_info.get("model_type"),
         "status": analysis_info.get("status"),
         "artifacts": artifacts,
     }
+
+
+@app.get("/api/analysis/{analysis_id}")
+async def get_analysis_artifact_endpoint(analysis_id: str):
+    """Get full persisted analysis artifact payload by ID."""
+    if load_analysis_artifact_store is None:
+        raise HTTPException(status_code=503, detail="Analysis artifact store unavailable")
+    try:
+        return load_analysis_artifact_store(analysis_id, data_dir=_analysis_data_dir())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Analysis artifact not found: {analysis_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ==================== WebSocket Endpoints ====================
