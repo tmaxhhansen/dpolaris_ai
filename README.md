@@ -80,6 +80,22 @@ These provide a stable API surface for external control services.
 python scripts/smoke_control_center.py --host 127.0.0.1 --port 8420
 ```
 
+### Universe API (Nasdaq/WSB/Combined)
+
+Universe source of truth is filesystem JSON under `universe/` (or `DPOLARIS_UNIVERSE_DIR` when set).  
+If files are missing, deterministic defaults are generated on first request.
+
+```bash
+curl http://127.0.0.1:8420/api/universe/list
+curl http://127.0.0.1:8420/api/universe/nasdaq300
+curl http://127.0.0.1:8420/api/universe/wsb100
+curl http://127.0.0.1:8420/api/universe/combined
+```
+
+Expected:
+- `/api/universe/list` returns names including `nasdaq300`, `wsb100`, `combined`
+- each universe endpoint returns `count > 0` and non-empty `tickers`
+
 ## Windows Orchestrator Notes
 
 Always run server and orchestrator with the venv interpreter, not system Python.

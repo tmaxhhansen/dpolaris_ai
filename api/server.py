@@ -112,7 +112,27 @@ SCAN_INDEX_FILE = "scan_results_index.json"
 SCAN_REQUEST_FILE = "scan_request.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_UNIVERSE_SCHEMA_VERSION = "1.0.0"
-KNOWN_UNIVERSE_NAMES = {"nasdaq_top500", "wsb_top500", "combined_1000"}
+UNIVERSE_CANONICAL_NAMES = ("nasdaq300", "wsb100", "combined")
+UNIVERSE_ALIAS_MAP = {
+    "nasdaq300": "nasdaq300",
+    "nasdaq_top_500": "nasdaq300",
+    "nasdaqtop500": "nasdaq300",
+    "nasdaq_top500": "nasdaq300",
+    "wsb100": "wsb100",
+    "wsb_top_500": "wsb100",
+    "wsbtop500": "wsb100",
+    "wsb_top500": "wsb100",
+    "wsb_favorites": "wsb100",
+    "wsbfavorites": "wsb100",
+    "combined": "combined",
+    "combined_1000": "combined",
+    "combined1000": "combined",
+}
+UNIVERSE_FILE_CANDIDATES = {
+    "nasdaq300": ("nasdaq300.json", "nasdaq_top_500.json", "nasdaq_top500.json"),
+    "wsb100": ("wsb100.json", "wsb_top_500.json", "wsb_top500.json"),
+    "combined": ("combined.json", "combined_1000.json"),
+}
 FALLBACK_UNIVERSE_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
     "AMD", "INTC", "ADBE", "CSCO", "PEP", "QCOM", "TXN", "AMAT", "INTU", "BKNG",
@@ -545,6 +565,26 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _universe_root() -> Path:
+    raw = os.getenv("DPOLARIS_UNIVERSE_DIR", "universe")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = _repo_root() / path
+    return path
+
+
+def _normalize_universe_key(name: str) -> str:
+    return "".join(ch.lower() for ch in str(name or "") if ch.isalnum() or ch == "_")
+
+
+def _canonical_universe_name(name: str) -> Optional[str]:
+    raw = str(name or "").strip()
+    if not raw:
+        return None
+    norm = _normalize_universe_key(raw)
+    return UNIVERSE_ALIAS_MAP.get(norm) or UNIVERSE_ALIAS_MAP.get(raw.lower())
+
+
 def _runs_root() -> Path:
     raw = os.getenv("DPOLARIS_RUNS_DIR", "runs")
     path = Path(raw).expanduser()
@@ -629,8 +669,9 @@ def _fallback_symbols() -> list[str]:
     return list(FALLBACK_UNIVERSE_SYMBOLS)
 
 
-def _build_fallback_nasdaq_payload(symbols: list[str]) -> dict[str, Any]:
+def _build_fallback_nasdaq_payload(symbols: list[str], *, top_n: int = 300) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc).isoformat()
+    limited = symbols[: max(1, int(top_n))]
     rows = [
         {
             "symbol": symbol,
@@ -640,14 +681,16 @@ def _build_fallback_nasdaq_payload(symbols: list[str]) -> dict[str, Any]:
             "sector": None,
             "industry": None,
         }
-        for symbol in symbols
+        for symbol in limited
     ]
     payload = {
+        "name": "nasdaq300",
         "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
         "generated_at": generated_at,
+        "updated_at": generated_at,
         "criteria": {
             "exchange": "NASDAQ",
-            "top_n_requested": 500,
+            "top_n_requested": int(top_n),
             "top_n_returned": len(rows),
             "ranking": "fallback_symbol_list",
             "liquidity_filter": {
@@ -671,11 +714,12 @@ def _build_fallback_nasdaq_payload(symbols: list[str]) -> dict[str, Any]:
     return _universe_with_hash(payload)
 
 
-def _build_fallback_wsb_payload(symbols: list[str]) -> dict[str, Any]:
+def _build_fallback_wsb_payload(symbols: list[str], *, top_n: int = 100) -> dict[str, Any]:
     generated = datetime.now(timezone.utc)
+    limited = symbols[: max(1, int(top_n))]
     rows = []
-    total = len(symbols)
-    for idx, symbol in enumerate(symbols, start=1):
+    total = len(limited)
+    for idx, symbol in enumerate(limited, start=1):
         mentions = max(1, total - idx + 1)
         rows.append(
             {
@@ -688,12 +732,14 @@ def _build_fallback_wsb_payload(symbols: list[str]) -> dict[str, Any]:
             }
         )
     payload = {
+        "name": "wsb100",
         "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
         "generated_at": generated.isoformat(),
+        "updated_at": generated.isoformat(),
         "window_start": (generated - timedelta(days=7)).isoformat(),
         "window_end": generated.isoformat(),
         "criteria": {
-            "top_n_requested": 500,
+            "top_n_requested": int(top_n),
             "top_n_returned": len(rows),
             "window_days": 7,
             "dedupe": "fallback",
@@ -716,7 +762,12 @@ def _build_fallback_wsb_payload(symbols: list[str]) -> dict[str, Any]:
     return _universe_with_hash(payload)
 
 
-def _build_fallback_combined_payload(ns_payload: dict[str, Any], ws_payload: dict[str, Any]) -> dict[str, Any]:
+def _build_fallback_combined_payload(
+    ns_payload: dict[str, Any],
+    ws_payload: dict[str, Any],
+    *,
+    top_n: int = 400,
+) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc).isoformat()
     merged: dict[str, dict[str, Any]] = {}
     for row in (ns_payload.get("tickers") or []):
@@ -770,13 +821,15 @@ def _build_fallback_combined_payload(ns_payload: dict[str, Any], ws_payload: dic
             str(x.get("symbol") or ""),
         ),
         reverse=True,
-    )[:1000]
+    )[: max(1, int(top_n))]
 
     payload = {
+        "name": "combined",
         "schema_version": DEFAULT_UNIVERSE_SCHEMA_VERSION,
         "generated_at": generated_at,
+        "updated_at": generated_at,
         "criteria": {
-            "top_n_requested": 1000,
+            "top_n_requested": int(top_n),
             "top_n_returned": len(merged_rows),
             "duplicate_resolution": "merge_on_symbol",
         },
@@ -787,47 +840,60 @@ def _build_fallback_combined_payload(ns_payload: dict[str, Any], ws_payload: dic
         "notes": [
             "Fallback combined universe generated in API runtime due missing universe files.",
         ],
+        "nasdaq300": ns_payload.get("tickers") or [],
+        "wsb100": ws_payload.get("tickers") or [],
         "nasdaq_top_500": ns_payload.get("tickers") or [],
         "wsb_top_500": ws_payload.get("tickers") or [],
+        "tickers": merged_rows,
         "merged": merged_rows,
     }
     return _universe_with_hash(payload)
 
 
+def _candidate_universe_paths(canonical_name: str) -> list[Path]:
+    universe_dir = _universe_root()
+    names = UNIVERSE_FILE_CANDIDATES.get(canonical_name, ())
+    return [universe_dir / name for name in names]
+
+
 def _ensure_default_universe_file(universe_name: str) -> Optional[Path]:
-    base_name = (universe_name or "").strip()
-    if base_name.endswith(".json"):
-        base_name = base_name[:-5]
-    if base_name not in KNOWN_UNIVERSE_NAMES:
+    canonical = _canonical_universe_name(universe_name)
+    if canonical is None:
         return None
 
-    universe_dir = _repo_root() / "universe"
+    universe_dir = _universe_root()
     universe_dir.mkdir(parents=True, exist_ok=True)
-    target = universe_dir / f"{base_name}.json"
-    if target.exists() and target.is_file():
-        return target
+
+    for candidate in _candidate_universe_paths(canonical):
+        if candidate.exists() and candidate.is_file():
+            return candidate
 
     symbols = _fallback_symbols()
-    nasdaq_path = universe_dir / "nasdaq_top_500.json"
-    wsb_path = universe_dir / "wsb_top_500.json"
-    combined_path = universe_dir / "combined_1000.json"
+    nasdaq_path = universe_dir / "nasdaq300.json"
+    wsb_path = universe_dir / "wsb100.json"
+    combined_path = universe_dir / "combined.json"
 
-    if base_name == "nasdaq_top_500":
-        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols))
+    if canonical == "nasdaq300":
+        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols, top_n=300))
         return nasdaq_path
 
-    if base_name == "wsb_top_500":
-        _json_dump(wsb_path, _build_fallback_wsb_payload(symbols))
+    if canonical == "wsb100":
+        _json_dump(wsb_path, _build_fallback_wsb_payload(symbols, top_n=100))
         return wsb_path
 
-    if not nasdaq_path.exists():
-        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols))
-    if not wsb_path.exists():
-        _json_dump(wsb_path, _build_fallback_wsb_payload(symbols))
+    ns_existing = next((p for p in _candidate_universe_paths("nasdaq300") if p.exists() and p.is_file()), nasdaq_path)
+    ws_existing = next((p for p in _candidate_universe_paths("wsb100") if p.exists() and p.is_file()), wsb_path)
 
-    ns_payload = _json_load(nasdaq_path) or _build_fallback_nasdaq_payload(symbols)
-    ws_payload = _json_load(wsb_path) or _build_fallback_wsb_payload(symbols)
-    _json_dump(combined_path, _build_fallback_combined_payload(ns_payload, ws_payload))
+    if not ns_existing.exists():
+        _json_dump(nasdaq_path, _build_fallback_nasdaq_payload(symbols, top_n=300))
+        ns_existing = nasdaq_path
+    if not ws_existing.exists():
+        _json_dump(wsb_path, _build_fallback_wsb_payload(symbols, top_n=100))
+        ws_existing = wsb_path
+
+    ns_payload = _json_load(ns_existing) or _build_fallback_nasdaq_payload(symbols, top_n=300)
+    ws_payload = _json_load(ws_existing) or _build_fallback_wsb_payload(symbols, top_n=100)
+    _json_dump(combined_path, _build_fallback_combined_payload(ns_payload, ws_payload, top_n=400))
     return combined_path
 
 
@@ -846,7 +912,17 @@ def _resolve_universe_path(universe_name: str) -> Path:
         if repo_candidate.exists() and repo_candidate.is_file():
             return repo_candidate
 
-    universe_dir = root / "universe"
+    canonical = _canonical_universe_name(name)
+    if canonical:
+        for candidate in _candidate_universe_paths(canonical):
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
+
+        generated = _ensure_default_universe_file(canonical)
+        if generated is not None and generated.exists() and generated.is_file():
+            return generated.resolve()
+
+    universe_dir = _universe_root()
     direct_name = f"{name}.json" if not name.endswith(".json") else name
     for possible in (
         universe_dir / direct_name,
@@ -855,15 +931,12 @@ def _resolve_universe_path(universe_name: str) -> Path:
         if possible.exists() and possible.is_file():
             return possible.resolve()
 
-    generated = _ensure_default_universe_file(name)
-    if generated is not None and generated.exists() and generated.is_file():
-        return generated.resolve()
-
     raise FileNotFoundError(f"Universe file not found for '{universe_name}'")
 
 
 def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[str, Any]], Path]:
     path = _resolve_universe_path(universe_name)
+    canonical_name = _canonical_universe_name(universe_name) or Path(path).stem
     payload = _json_load(path)
     if payload is None:
         raise ValueError(f"Invalid universe JSON: {path}")
@@ -874,8 +947,22 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
     elif isinstance(payload.get("tickers"), list):
         rows = payload.get("tickers") or []
     else:
-        # Fallback to merged list from known keys.
-        rows = (payload.get("nasdaq_top_500") or []) + (payload.get("wsb_top_500") or [])
+        rows = (
+            (payload.get("nasdaq300") or [])
+            + (payload.get("wsb100") or [])
+            + (payload.get("nasdaq_top_500") or [])
+            + (payload.get("wsb_top_500") or [])
+        )
+
+    if canonical_name == "combined" and not rows:
+        ns_payload, ns_rows, _ = _load_scan_universe("nasdaq300")
+        ws_payload, ws_rows, _ = _load_scan_universe("wsb100")
+        payload = _build_fallback_combined_payload(
+            ns_payload or {"tickers": ns_rows},
+            ws_payload or {"tickers": ws_rows},
+            top_n=max(1, len(ns_rows) + len(ws_rows)),
+        )
+        rows = payload.get("tickers") or payload.get("merged") or []
 
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -920,6 +1007,9 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
 
     if not normalized:
         raise ValueError(f"No tickers found in universe: {path}")
+    payload["name"] = canonical_name
+    if "updated_at" not in payload:
+        payload["updated_at"] = payload.get("generated_at")
     return payload, normalized, path
 
 
@@ -2670,7 +2760,7 @@ class DeepLearningTrainJobRequest(BaseModel):
 
 
 class ScanStartRequest(BaseModel):
-    universe: str = Field(default="combined_1000")
+    universe: str = Field(default="combined")
     run_mode: str = Field(default="scan", alias="runMode")
     horizon_config: dict[str, Any] = Field(default_factory=dict, alias="horizonConfig")
     options_mode: bool = Field(default=False, alias="optionsMode")
@@ -3574,48 +3664,39 @@ def _list_scan_runs(limit: int, status_filter: Optional[str]) -> list[dict[str, 
 
 
 def _list_available_universes() -> list[dict[str, Any]]:
-    """List all available universe files."""
+    """List canonical universe definitions with metadata."""
     universes: list[dict[str, Any]] = []
-    universe_dir = _repo_root() / "universe"
 
-    # Ensure default universes exist
-    for name in KNOWN_UNIVERSE_NAMES:
+    for name in UNIVERSE_CANONICAL_NAMES:
         _ensure_default_universe_file(name)
-
-    if universe_dir.exists() and universe_dir.is_dir():
-        for path in sorted(universe_dir.glob("*.json")):
-            name = path.stem
-            payload = _json_load(path)
-            if payload is None:
-                continue
-
-            # Count tickers
-            ticker_count = 0
-            if isinstance(payload.get("merged"), list):
-                ticker_count = len(payload.get("merged"))
-            elif isinstance(payload.get("tickers"), list):
-                ticker_count = len(payload.get("tickers"))
-
-            universes.append({
+        try:
+            payload, rows, path = _load_scan_universe(name)
+        except Exception:
+            continue
+        universes.append(
+            {
                 "name": name,
                 "path": str(path),
-                "ticker_count": ticker_count,
+                "ticker_count": len(rows),
                 "schema_version": payload.get("schema_version"),
                 "generated_at": payload.get("generated_at"),
+                "updated_at": payload.get("updated_at") or payload.get("generated_at"),
                 "universe_hash": payload.get("universe_hash"),
-            })
+            }
+        )
 
     return universes
 
 
-@app.get("/universe/list")
 @app.get("/api/universe/list")
-async def list_universes():
-    """
-    List all available universe definitions.
+async def list_universe_names():
+    """Return canonical universe names for control-center clients."""
+    return [item["name"] for item in _list_available_universes()]
 
-    Returns JSON list of universe names and metadata.
-    """
+
+@app.get("/universe/list")
+async def list_universes_legacy():
+    """Legacy metadata-rich universe listing."""
     universes = _list_available_universes()
     return {
         "universes": universes,
@@ -3641,15 +3722,20 @@ async def get_scan_universe(universe_name: str):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {
-        "name": universe_name,
+    canonical_name = _canonical_universe_name(universe_name) or universe_name
+    response = {
+        "name": canonical_name,
+        "requested_name": universe_name,
         "path": str(path),
         "generated_at": payload.get("generated_at"),
+        "updated_at": payload.get("updated_at") or payload.get("generated_at"),
         "universe_hash": payload.get("universe_hash"),
         "schema_version": payload.get("schema_version"),
         "count": len(rows),
+        "tickers": rows,
         "universe": payload,
     }
+    return response
 
 
 @app.get("/scan/runs")
