@@ -1779,6 +1779,35 @@ def _load_scan_universe(universe_name: str) -> tuple[dict[str, Any], list[dict[s
             }
         )
 
+    if canonical_name == "nasdaq500" and len(normalized) < 500:
+        seen_symbols = {item.get("symbol") for item in normalized if isinstance(item, dict)}
+        for fallback in _fallback_symbols(minimum=520):
+            symbol = _sanitize_symbol(fallback)
+            if not symbol or symbol in seen_symbols:
+                continue
+            seen_symbols.add(symbol)
+            normalized.append(
+                {
+                    "symbol": symbol,
+                    "name": symbol,
+                    "company_name": symbol,
+                    "sector": None,
+                    "industry": None,
+                    "market_cap": None,
+                    "avg_volume_7d": None,
+                    "avg_dollar_volume": None,
+                    "change_pct_1d": None,
+                    "change_percent_1d": None,
+                    "analysis_date": None,
+                    "last_analysis_date": None,
+                    "mention_count": None,
+                    "mentions": None,
+                    "mention_velocity": None,
+                }
+            )
+            if len(normalized) >= 500:
+                break
+
     if canonical_name == "custom":
         payload["name"] = "custom"
         if normalized:
